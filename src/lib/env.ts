@@ -42,6 +42,7 @@ export interface RuntimeEnvConfig {
   llmBaseUrl: string;
   isSupabaseConfigured: boolean;
   isExotelCredentialsConfigured: boolean;
+  isTwilioCredentialsConfigured: boolean;
   isSarvamConfigured: boolean;
 }
 
@@ -99,6 +100,16 @@ export function getRuntimeEnv(): RuntimeEnvConfig {
       !exotelToken.includes('your_exotel_api_token')
   );
 
+  const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID?.trim() || '';
+  const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN?.trim() || '';
+  const twilioApiKeySid = process.env.TWILIO_API_KEY_SID?.trim() || '';
+  const twilioApiKeySecret = process.env.TWILIO_API_KEY_SECRET?.trim() || '';
+  const isTwilioCredentialsConfigured = Boolean(
+    twilioAccountSid &&
+      (twilioAuthToken || (twilioApiKeySid && twilioApiKeySecret)) &&
+      !twilioAccountSid.includes('your_twilio_account_sid')
+  );
+
   const sarvamKey = process.env.SARVAM_API_KEY?.trim() || '';
   const isSarvamConfigured = Boolean(sarvamKey && sarvamKey !== 'your_sarvam_api_key');
 
@@ -134,6 +145,7 @@ export function getRuntimeEnv(): RuntimeEnvConfig {
     llmBaseUrl: process.env.LLM_BASE_URL?.trim() || 'https://api.sarvam.ai/v1',
     isSupabaseConfigured: supa.isConfigured,
     isExotelCredentialsConfigured,
+    isTwilioCredentialsConfigured,
     isSarvamConfigured,
   };
 }

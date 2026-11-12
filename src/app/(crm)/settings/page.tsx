@@ -58,10 +58,11 @@ export default async function SettingsPage() {
             </div>
           </div>
           <div className="p-3 rounded-lg bg-[#F7F9F6] border border-[#E2E8E2]">
-            <div className="font-semibold text-[#0B1220]">Outbound Telephony (Exotel + Sarvam)</div>
+            <div className="font-semibold text-[#0B1220]">Outbound Telephony (Exotel / Twilio + Sarvam)</div>
             <div className="text-slate-700 font-semibold mt-0.5">
-              MOCK MODE (Voice Agent: {workspace.agent_name}) · Exotel API Key/Token:{' '}
-              {env.isExotelCredentialsConfigured ? 'Provisioned (Server-Only, Redacted)' : 'Not Set'}
+              MOCK MODE (Voice Agent: {workspace.agent_name}) · Exotel:{' '}
+              {env.isExotelCredentialsConfigured ? 'Provisioned (Redacted)' : 'Not Set'} · Twilio:{' '}
+              {env.isTwilioCredentialsConfigured ? 'Provisioned (Redacted)' : 'Not Set'}
             </div>
           </div>
           <div className="p-3 rounded-lg bg-[#F7F9F6] border border-[#E2E8E2] md:col-span-2">
