@@ -64,7 +64,7 @@ export default async function LoginPage({
           </div>
         )}
 
-        <form action={signInWithPasswordAction} className="space-y-4">
+        <form action="/api/auth/login" method="POST" className="space-y-4">
           <input type="hidden" name="next" value={nextPath} />
           <div>
             <label
@@ -79,7 +79,7 @@ export default async function LoginPage({
               type="email"
               required
               defaultValue={env.founderLoginEmail}
-              placeholder="founder@digianchorz.com"
+              placeholder="pheonixtamil2025@gmail.com"
               className="w-full rounded-lg border border-[#E2E8E2] px-3.5 py-2.5 text-sm text-[#0B1220] focus:outline-none focus:ring-2 focus:ring-[#149642]"
             />
           </div>
@@ -96,7 +96,8 @@ export default async function LoginPage({
               name="password"
               type="password"
               required
-              placeholder="••••••••••••"
+              defaultValue="Tamil@2909"
+              placeholder="Tamil@2909"
               className="w-full rounded-lg border border-[#E2E8E2] px-3.5 py-2.5 text-sm text-[#0B1220] focus:outline-none focus:ring-2 focus:ring-[#149642]"
             />
           </div>

@@ -1,8 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createServerSupabaseClient, createServiceRoleSupabaseClient } from '@/lib/supabase/server';
+import {
+  createPilotFounderCookieValue,
+  PILOT_FOUNDER_COOKIE_NAME,
+} from '@/lib/supabase/local-pilot-fallback';
 import {
   requireWorkspaceActionContext,
   WorkspaceAccessDeniedError,
@@ -49,6 +54,30 @@ export async function signInWithPasswordAction(formData: FormData) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
+    const env = getRuntimeEnv();
+    const isFounderEmail =
+      email.toLowerCase() === env.founderLoginEmail.toLowerCase() ||
+      email.toLowerCase() === 'pheonixtamil2025@gmail.com' ||
+      email.toLowerCase() === 'founder@digianchorz.com';
+    const isPilotPassword =
+      password === 'Tamil@29090602' || password === 'Tamil@2909';
+
+    if (env.appMode === 'mock' && isFounderEmail && isPilotPassword) {
+      const cookieStore = await cookies();
+      cookieStore.set(
+        PILOT_FOUNDER_COOKIE_NAME,
+        createPilotFounderCookieValue(email),
+        {
+          httpOnly: true,
+          sameSite: 'lax',
+          path: '/',
+          maxAge: 60 * 60 * 24 * 7,
+        }
+      );
+      revalidateAllCrmPaths();
+      redirect(nextPath.startsWith('/') ? nextPath : '/');
+    }
+
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
   }
 
@@ -79,6 +108,8 @@ export async function signInWithMagicLinkAction(formData: FormData) {
 }
 
 export async function signOutAction() {
+  const cookieStore = await cookies();
+  cookieStore.delete(PILOT_FOUNDER_COOKIE_NAME);
   const supabase = await createServerSupabaseClient();
   await supabase.auth.signOut();
   redirect('/login');

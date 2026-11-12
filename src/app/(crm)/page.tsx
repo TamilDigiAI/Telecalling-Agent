@@ -6,6 +6,7 @@ import {
   listWorkspaceLeads,
 } from '@/lib/crm/service';
 import { runMockOutboundCallAction } from '@/app/actions/crm';
+import { LiveNilaCallButton } from '@/components/leads/LiveNilaCallButton';
 
 export default async function OverviewPage() {
   const pageState = await getProtectedPageContext();
@@ -85,33 +86,40 @@ export default async function OverviewPage() {
           ) : (
             <div className="divide-y divide-[#E2E8E2]">
               {recentLeads.map((lead) => (
-                <div key={lead.id} className="py-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-semibold text-sm text-[#0B1220]">
-                      {lead.full_name}{' '}
-                      <span className="text-xs font-mono text-slate-500">
-                        ({lead.external_lead_id})
+                <div key={lead.id} className="py-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-sm text-[#0B1220]">
+                        {lead.full_name}{' '}
+                        <span className="text-xs font-mono text-slate-500">
+                          ({lead.external_lead_id})
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-600">
+                        {lead.phone_e164} · {lead.service_interest}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F7F9F6] border border-[#E2E8E2]">
+                        {lead.lead_temperature}
                       </span>
-                    </div>
-                    <div className="text-xs text-slate-600">
-                      {lead.phone_e164} · {lead.service_interest}
+                      <form action={runMockOutboundCallAction}>
+                        <input type="hidden" name="leadId" value={lead.id} />
+                        <input type="hidden" name="scenario" value="HOT_CALLBACK" />
+                        <button
+                          type="submit"
+                          className="px-2.5 py-1 rounded-lg bg-[#0F7633] hover:bg-[#149642] text-white text-xs font-semibold cursor-pointer"
+                        >
+                          Qualify HOT ({workspace.agent_name})
+                        </button>
+                      </form>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F7F9F6] border border-[#E2E8E2]">
-                      {lead.lead_temperature}
-                    </span>
-                    <form action={runMockOutboundCallAction}>
-                      <input type="hidden" name="leadId" value={lead.id} />
-                      <input type="hidden" name="scenario" value="HOT_CALLBACK" />
-                      <button
-                        type="submit"
-                        className="px-2.5 py-1 rounded-lg bg-[#0F7633] hover:bg-[#149642] text-white text-xs font-semibold cursor-pointer"
-                      >
-                        Qualify HOT ({workspace.agent_name})
-                      </button>
-                    </form>
-                  </div>
+                  <LiveNilaCallButton
+                    leadId={lead.id}
+                    phoneE164={lead.phone_e164}
+                    fullName={lead.full_name}
+                  />
                 </div>
               ))}
             </div>

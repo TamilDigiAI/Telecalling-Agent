@@ -1,12 +1,10 @@
 -- =============================================================================
 -- DigiAnchorZ Voice SaaS · SQL Founder Bootstrap Snippet
--- Replace the UUID below with an existing Supabase Auth user ID from auth.users
--- and run in the Supabase SQL Editor (or use `npm run bootstrap:founder -- <USER_ID>`).
+-- Assigns your registered Supabase Auth user (pheonixtamil2025@gmail.com)
+-- as owner of the DigiAnchorZ workspace and seeds the synthetic test lead.
 -- =============================================================================
 
--- Example:
--- select public.bootstrap_digianchorz_founder(
---   '11111111-1111-4111-8111-111111111111'::uuid,
---   'founder@digianchorz.com'
--- );
-
+select public.bootstrap_digianchorz_founder(
+  '30f1dac0-686d-47f4-94f3-acd3d55cc0ed'::uuid,
+  'pheonixtamil2025@gmail.com'
+);

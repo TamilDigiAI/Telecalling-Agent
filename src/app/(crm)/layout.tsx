@@ -115,7 +115,7 @@ export default async function CrmLayout({
             Founder: <span className="font-medium text-[#0B1220]">{user.email ?? user.id}</span>
           </div>
           <div className="text-slate-500">Timezone: {workspace.timezone}</div>
-          <form action={signOutAction}>
+          <form action="/api/auth/logout" method="POST">
             <button
               type="submit"
               className="w-full text-left px-3 py-1.5 rounded-lg border border-[#E2E8E2] text-xs font-semibold text-[#0B1220] hover:bg-slate-50 cursor-pointer"

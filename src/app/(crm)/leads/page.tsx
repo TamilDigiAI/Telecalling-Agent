@@ -1,6 +1,8 @@
 import { getProtectedPageContext } from '@/lib/auth/workspace-guard';
 import { listWorkspaceLeads } from '@/lib/crm/service';
 import { runMockOutboundCallAction, saveCallOutcomeAction } from '@/app/actions/crm';
+import { LiveNilaCallButton } from '@/components/leads/LiveNilaCallButton';
+import { GoogleSheetSyncButton } from '@/components/leads/GoogleSheetSyncButton';
 import type { LeadTemperature } from '@/types/crm';
 
 export default async function LeadsPage({
@@ -42,6 +44,7 @@ export default async function LeadsPage({
             </a>
           </p>
         </div>
+        <GoogleSheetSyncButton sheetId={workspace.google_sheet_id} />
       </div>
 
       <form method="get" className="bg-white border border-[#E2E8E2] rounded-xl p-4 flex flex-wrap gap-3">
@@ -197,6 +200,12 @@ export default async function LeadsPage({
                 </button>
               </form>
             </div>
+
+            <LiveNilaCallButton
+              leadId={lead.id}
+              phoneE164={lead.phone_e164}
+              fullName={lead.full_name}
+            />
           </article>
         ))}
       </div>

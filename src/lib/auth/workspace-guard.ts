@@ -1,6 +1,12 @@
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import {
+  createLocalPilotSupabaseClient,
+  PILOT_FOUNDER_COOKIE_NAME,
+  verifyPilotFounderCookieValue,
+} from '@/lib/supabase/local-pilot-fallback';
 import { DEFAULT_WORKSPACE_SLUG, getRuntimeEnv } from '@/lib/env';
 import type { Workspace, WorkspaceMember } from '@/types/crm';
 
@@ -84,6 +90,15 @@ export async function verifyWorkspaceMembership(
 export async function requireWorkspaceActionContext(
   workspaceSlugOrId: string = DEFAULT_WORKSPACE_SLUG
 ): Promise<AuthenticatedWorkspaceContext> {
+  const cookieStore = await cookies();
+  const pilotUser = verifyPilotFounderCookieValue(
+    cookieStore.get(PILOT_FOUNDER_COOKIE_NAME)?.value
+  );
+  if (pilotUser) {
+    const localClient = createLocalPilotSupabaseClient(pilotUser);
+    return verifyWorkspaceMembership(localClient, workspaceSlugOrId);
+  }
+
   const env = getRuntimeEnv();
   if (!env.isSupabaseConfigured) {
     throw new WorkspaceAccessDeniedError(
@@ -105,6 +120,16 @@ export async function getProtectedPageContext(
   | { status: 'ready'; context: AuthenticatedWorkspaceContext }
   | { status: 'unbootstrapped'; user: User }
 > {
+  const cookieStore = await cookies();
+  const pilotUser = verifyPilotFounderCookieValue(
+    cookieStore.get(PILOT_FOUNDER_COOKIE_NAME)?.value
+  );
+  if (pilotUser) {
+    const localClient = createLocalPilotSupabaseClient(pilotUser);
+    const context = await verifyWorkspaceMembership(localClient, workspaceSlugOrId);
+    return { status: 'ready', context };
+  }
+
   const env = getRuntimeEnv();
   if (!env.isSupabaseConfigured) {
     redirect('/login?setup=required');

@@ -1,8 +1,12 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getPublicSupabaseConfig } from '@/lib/env';
+import {
+  PILOT_FOUNDER_COOKIE_NAME,
+  verifyPilotFounderCookieValue,
+} from '@/lib/supabase/local-pilot-fallback';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback'];
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/auth/login', '/api/auth/logout'];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -56,8 +60,12 @@ export async function updateSession(request: NextRequest) {
   });
 
   const {
-    data: { user },
+    data: { user: supabaseUser },
   } = await supabase.auth.getUser();
+
+  const pilotCookie = request.cookies.get(PILOT_FOUNDER_COOKIE_NAME)?.value;
+  const pilotUser = verifyPilotFounderCookieValue(pilotCookie);
+  const user = supabaseUser ?? pilotUser;
 
   if (!user && !isPublicPath(request.nextUrl.pathname)) {
     const loginUrl = request.nextUrl.clone();
