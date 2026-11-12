@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+:root {
+  --brand-green: #149642;
+  --brand-green-dark: #0f7633;
+  --accent-gold: #fbb61b;
+  --ink: #0b1220;
+  --app-bg: #f7f9f6;
+  --surface: #ffffff;
+  --border: #e2e8e2;
+}
+
+body {
+  background-color: var(--app-bg);
+  color: var(--ink);
+  font-family: Inter, "Noto Sans Tamil", system-ui, -apple-system, sans-serif;
+}
+
