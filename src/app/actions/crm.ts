@@ -200,6 +200,10 @@ export async function saveCallOutcomeAction(formData: FormData) {
 
 export async function createManualFollowUpTaskAction(formData: FormData) {
   const { supabase, workspace, user } = await requireWorkspaceActionContext();
+  const confirmed = formData.get('confirmed') === 'true' || formData.get('confirmed') === 'on';
+  if (!confirmed) {
+    throw new Error('Explicit founder confirmation is required before saving task changes.');
+  }
   const leadId = String(formData.get('leadId') ?? '').trim();
   const title = String(formData.get('title') ?? '').trim();
   const notes = String(formData.get('notes') ?? '').trim();
@@ -240,16 +244,77 @@ export async function updateWorkspaceControlsAction(formData: FormData) {
   const { supabase, workspace } = await requireWorkspaceActionContext();
   const dialPaused = formData.get('dialPaused') === 'true';
   const attemptCap = Number(formData.get('attemptCap') ?? workspace.attempt_cap);
+  const startHour = Number(
+    formData.get('allowedStartHourIst') ?? workspace.allowed_start_hour_ist ?? 9
+  );
+  const endHour = Number(
+    formData.get('allowedEndHourIst') ?? workspace.allowed_end_hour_ist ?? 20
+  );
+  const rawAllowlist = String(formData.get('allowlistPhones') ?? '');
+  const allowlistPhones = rawAllowlist
+    .split(/[\r\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const digits = entry.replace(/\D/g, '');
+      if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+      if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+      return entry.startsWith('+') ? entry : `+${digits}`;
+    });
 
   const { error } = await supabase
     .from('workspaces')
     .update({
       dial_paused: dialPaused,
       attempt_cap: Number.isFinite(attemptCap) ? Math.min(10, Math.max(1, attemptCap)) : 3,
+      allowed_start_hour_ist: Number.isFinite(startHour)
+        ? Math.min(22, Math.max(0, startHour))
+        : 9,
+      allowed_end_hour_ist: Number.isFinite(endHour)
+        ? Math.min(23, Math.max(1, endHour))
+        : 20,
+      allowlist_phones: allowlistPhones,
     })
     .eq('id', workspace.id);
 
   if (error) throw error;
+  revalidateAllCrmPaths();
+}
+
+export async function retryFailedSheetSyncJobAction(formData: FormData) {
+  const { supabase, workspace } = await requireWorkspaceActionContext();
+  const jobId = String(formData.get('jobId') ?? '').trim();
+  if (!jobId) throw new Error('jobId is required');
+
+  const env = getRuntimeEnv();
+  const writer = env.supabaseSecretKey ? createServiceRoleSupabaseClient() : supabase;
+
+  await writer
+    .from('sheet_sync_jobs')
+    .update({
+      status: 'PENDING',
+      next_attempt_at: new Date().toISOString(),
+      locked_by: null,
+      lease_expires_at: null,
+      last_error: null,
+    })
+    .eq('workspace_id', workspace.id)
+    .eq('id', jobId);
+
+  revalidateAllCrmPaths();
+}
+
+export async function resolveIntegrationErrorAction(formData: FormData) {
+  const { supabase, workspace } = await requireWorkspaceActionContext();
+  const errorId = String(formData.get('errorId') ?? '').trim();
+  if (!errorId) throw new Error('errorId is required');
+
+  await supabase
+    .from('integration_errors')
+    .update({ resolved: true })
+    .eq('workspace_id', workspace.id)
+    .eq('id', errorId);
+
   revalidateAllCrmPaths();
 }
 

@@ -1,0 +1,246 @@
+{
+  "name": "Nila — Sheet Write-back",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger-writeback",
+      "name": "Every 1 Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CRM_BASE_URL || 'http://localhost:3000'}}/api/n8n/sheet-sync/claim",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workerId: 'n8n-sheet-writeback', leaseSeconds: 120, limit: 10 }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "claim-pending-sync-jobs",
+      "name": "Claim Pending Sync Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_BACKEND_AUTH_CREDENTIAL_ID",
+          "name": "DigiAnchorZ CRM Backend Secret (x-n8n-webhook-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobs = $input.first().json.jobs || [];\nreturn jobs.map((job) => ({ json: job }));"
+      },
+      "id": "split-sync-jobs",
+      "name": "Split Claimed Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1X9sQhlRx_7jo1c6gZ8SBxNas5aqqRjgAY0-UzOUB97A",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "options": {
+          "valueRenderMode": "UNFORMATTED_VALUE"
+        }
+      },
+      "id": "read-sheet-for-matching",
+      "name": "Read Sheet Rows for Lead ID Match",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [900, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "DigiAnchorZ Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate unique Lead ID match (handles row movement; rejects missing or ambiguous matches)\nconst jobs = $('Split Claimed Jobs').all().map((i) => i.json);\nconst sheetRows = $input.all().map((i, idx) => ({\n  rowNumber: Number(i.json.row_number || idx + 2),\n  leadId: String(i.json['Lead ID'] ?? '').trim(),\n  phone: String(i.json['Phone'] ?? '').trim(),\n}));\n\nreturn jobs.map((job) => {\n  const matches = sheetRows.filter((r) => r.leadId && r.leadId === job.externalLeadId);\n  if (matches.length === 0) {\n    return { json: { ...job, matchOk: false, matchError: `Lead ID ${job.externalLeadId} not found in Google Sheet` } };\n  }\n  if (matches.length > 1) {\n    return { json: { ...job, matchOk: false, matchError: `Ambiguous match: ${matches.length} rows share Lead ID ${job.externalLeadId}` } };\n  }\n  const matched = matches[0];\n  return {\n    json: {\n      ...job,\n      matchOk: true,\n      matchedRowNumber: matched.rowNumber,\n      range: `${job.sheetTab || 'Leads'}!J${matched.rowNumber}:T${matched.rowNumber}`,\n      updateRow: {\n        'Lead ID': job.externalLeadId,\n        ...job.automationColumnsJToT,\n      },\n    },\n  };\n});"
+      },
+      "id": "validate-lead-match",
+      "name": "Validate Unique Lead ID Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.matchOk }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-match-valid",
+      "name": "Unique Row Match?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1380, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1X9sQhlRx_7jo1c6gZ8SBxNas5aqqRjgAY0-UzOUB97A",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["Lead ID"],
+          "value": {
+            "Lead ID": "={{ $json.externalLeadId }}",
+            "CRM Lead ID": "={{ $json.automationColumnsJToT['CRM Lead ID'] }}",
+            "Call Outcome": "={{ $json.automationColumnsJToT['Call Outcome'] }}",
+            "Lead Temperature": "={{ $json.automationColumnsJToT['Lead Temperature'] }}",
+            "Qualification Reason": "={{ $json.automationColumnsJToT['Qualification Reason'] }}",
+            "Call Summary": "={{ $json.automationColumnsJToT['Call Summary'] }}",
+            "Last Call At": "={{ $json.automationColumnsJToT['Last Call At'] }}",
+            "Callback At": "={{ $json.automationColumnsJToT['Callback At'] }}",
+            "Attempts": "={{ $json.automationColumnsJToT['Attempts'] }}",
+            "Sync Status": "SYNCED",
+            "Last Synced At": "={{ $json.automationColumnsJToT['Last Synced At'] }}",
+            "Automation Do Not Call": "={{ $json.automationColumnsJToT['Automation Do Not Call'] }}"
+          }
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "update-sheet-columns-j-to-t",
+      "name": "Update Columns J:T (RAW)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1640, 200],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "DigiAnchorZ Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CRM_BASE_URL || 'http://localhost:3000'}}/api/n8n/sheet-sync/ack",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $('Validate Unique Lead ID Match').item.json.jobId, leaseToken: $('Validate Unique Lead ID Match').item.json.leaseToken, status: 'SUCCEEDED', matchedRowNumber: $('Validate Unique Lead ID Match').item.json.matchedRowNumber }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "ack-sync-success",
+      "name": "Ack Sync Succeeded",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 180],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_BACKEND_AUTH_CREDENTIAL_ID",
+          "name": "DigiAnchorZ CRM Backend Secret (x-n8n-webhook-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CRM_BASE_URL || 'http://localhost:3000'}}/api/n8n/sheet-sync/ack",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $json.jobId || $('Validate Unique Lead ID Match').item.json.jobId, leaseToken: $json.leaseToken || $('Validate Unique Lead ID Match').item.json.leaseToken, status: 'FAILED', error: $json.matchError || $json.error?.message || 'Google Sheets write-back failed' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "ack-sync-failed",
+      "name": "Ack Sync Failed (Retryable)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_BACKEND_AUTH_CREDENTIAL_ID",
+          "name": "DigiAnchorZ CRM Backend Secret (x-n8n-webhook-secret)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 1 Minute": {
+      "main": [[{ "node": "Claim Pending Sync Jobs", "type": "main", "index": 0 }]]
+    },
+    "Claim Pending Sync Jobs": {
+      "main": [[{ "node": "Split Claimed Jobs", "type": "main", "index": 0 }]]
+    },
+    "Split Claimed Jobs": {
+      "main": [[{ "node": "Read Sheet Rows for Lead ID Match", "type": "main", "index": 0 }]]
+    },
+    "Read Sheet Rows for Lead ID Match": {
+      "main": [[{ "node": "Validate Unique Lead ID Match", "type": "main", "index": 0 }]]
+    },
+    "Validate Unique Lead ID Match": {
+      "main": [[{ "node": "Unique Row Match?", "type": "main", "index": 0 }]]
+    },
+    "Unique Row Match?": {
+      "main": [
+        [{ "node": "Update Columns J:T (RAW)", "type": "main", "index": 0 }],
+        [{ "node": "Ack Sync Failed (Retryable)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Columns J:T (RAW)": {
+      "main": [
+        [{ "node": "Ack Sync Succeeded", "type": "main", "index": 0 }],
+        [{ "node": "Ack Sync Failed (Retryable)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "Nila — Integration Errors",
+    "timezone": "Asia/Kolkata"
+  },
+  "active": false
+}

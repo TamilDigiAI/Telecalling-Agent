@@ -64,10 +64,11 @@ export function NilaVoiceTestPanel({
   const [transcription, setTranscription] = useState<StageTranscriptionResult | null>(null);
   const [dialogue, setDialogue] = useState<StageDialogueResult | null>(null);
   const [tts, setTts] = useState<StageTtsResult | null>(null);
-  const [playbackStatus, setPlaybackStatus] = useState<'idle' | 'playing' | 'succeeded' | 'blocked'>('idle');
+  const [playbackStatus, setPlaybackStatus] = useState<'idle' | 'playing' | 'succeeded' | 'blocked' | 'interrupted'>('idle');
+  const [bargeInCount, setBargeInCount] = useState(0);
 
   const [sampleUtteranceText, setSampleUtteranceText] = useState(
-    'வணக்கம் நிலா, நாளைக்கு காலைல 11 AM-க்கு Meta Ads campaign பத்தி பேச founder callback arrange பண்ண முடியுமாங்க?'
+    'Hello, digital marketing pathi details venum.'
   );
 
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -75,16 +76,35 @@ export function NilaVoiceTestPanel({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const pcmChunksRef = useRef<Float32Array[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  async function playBase64Audio(base64Audio: string) {
+  function interruptAgentPlayback(): boolean {
+    let interrupted = false;
+    if (audioElementRef.current && !audioElementRef.current.paused) {
+      audioElementRef.current.pause();
+      audioElementRef.current.currentTime = 0;
+      setPlaybackStatus('interrupted');
+      interrupted = true;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      interrupted = true;
+    }
+    if (interrupted) {
+      setBargeInCount((c) => c + 1);
+    }
+    return interrupted;
+  }
+
+  async function playBase64Audio(base64Audio: string, mimeType = 'audio/wav') {
     if (!base64Audio) return;
-    const dataUrl = `data:audio/wav;base64,${base64Audio}`;
+    const dataUrl = `data:${mimeType};base64,${base64Audio}`;
     if (audioElementRef.current) {
       audioElementRef.current.src = dataUrl;
       try {
         setPlaybackStatus('playing');
         await audioElementRef.current.play();
-        setPlaybackStatus('succeeded');
       } catch {
         setPlaybackStatus('blocked');
       }
@@ -92,6 +112,8 @@ export function NilaVoiceTestPanel({
   }
 
   async function startPushToTalk() {
+    // Immediate barge-in: stop Nila mid-sentence if caller starts speaking
+    interruptAgentPlayback();
     setErrorMessage(null);
     pcmChunksRef.current = [];
     try {
@@ -150,6 +172,8 @@ export function NilaVoiceTestPanel({
     setIsLoading(true);
     setActiveAction('push_to_talk');
     setErrorMessage(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
       const form = new FormData();
       form.append('stage', 'full');
@@ -158,6 +182,7 @@ export function NilaVoiceTestPanel({
       const res = await fetch('/api/assistant/nila-voice-test', {
         method: 'POST',
         body: form,
+        signal: controller.signal,
       });
       const data = (await res.json()) as FullNilaVoiceTestResult & { error?: string };
       if (!res.ok || data.error) {
@@ -168,20 +193,27 @@ export function NilaVoiceTestPanel({
       setDialogue(data.dialogue);
       setTts(data.tts);
       if (data.tts?.audioBase64) {
-        await playBase64Audio(data.tts.audioBase64);
+        await playBase64Audio(data.tts.audioBase64, data.tts.mimeType);
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       setErrorMessage(err instanceof Error ? err.message : 'Voice test failed');
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setIsLoading(false);
       setActiveAction(null);
     }
   }
 
-  async function runStageTest(stage: 'stt' | 'dialogue' | 'tts' | 'full') {
+  async function runStageTest(stage: 'stt' | 'dialogue' | 'tts' | 'full' | 'silence') {
+    interruptAgentPlayback();
     setIsLoading(true);
     setActiveAction(stage);
     setErrorMessage(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
       const res = await fetch('/api/assistant/nila-voice-test', {
         method: 'POST',
@@ -191,6 +223,7 @@ export function NilaVoiceTestPanel({
           transcript: sampleUtteranceText,
           replyText: dialogue?.replyText,
         }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -202,12 +235,16 @@ export function NilaVoiceTestPanel({
       if (data.tts) {
         setTts(data.tts);
         if (data.tts.audioBase64) {
-          await playBase64Audio(data.tts.audioBase64);
+          await playBase64Audio(data.tts.audioBase64, data.tts.mimeType);
         }
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       setErrorMessage(err instanceof Error ? err.message : 'Stage test failed');
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setIsLoading(false);
       setActiveAction(null);
     }
@@ -238,7 +275,7 @@ export function NilaVoiceTestPanel({
 
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
           <span className="px-2.5 py-1 rounded-lg bg-[#F7F9F6] border border-[#E2E8E2] text-slate-700">
-            Exotel Dialing: DISABLED
+            Vobiz Outbound Dialing: DISABLED
           </span>
           <span className="px-2.5 py-1 rounded-lg bg-[#F7F9F6] border border-[#E2E8E2] text-slate-700">
             Google Sheets Write-Back: DISABLED
@@ -254,7 +291,6 @@ export function NilaVoiceTestPanel({
         <div className="lg:col-span-5 flex flex-col items-center justify-center p-5 rounded-xl bg-[#F7F9F6] border border-[#E2E8E2] text-center space-y-3">
           <button
             type="button"
-            disabled={isLoading}
             onMouseDown={startPushToTalk}
             onMouseUp={stopPushToTalkAndSend}
             onTouchStart={startPushToTalk}
@@ -272,13 +308,15 @@ export function NilaVoiceTestPanel({
           >
             {isRecording
               ? 'Recording Utterance... Release to Send to Nila'
-              : isLoading && activeAction === 'push_to_talk'
-                ? 'Processing Utterance on Server...'
-                : 'Hold to Speak (Push-to-Talk)'}
+              : playbackStatus === 'playing'
+                ? 'Hold to Interrupt Nila (Barge-In)'
+                : isLoading && activeAction === 'push_to_talk'
+                  ? 'Processing Utterance on Server...'
+                  : 'Hold to Speak (Push-to-Talk)'}
           </button>
           <p className="text-xs text-slate-600">
-            Hold the button to record one short Tanglish utterance, then release to run Saaras STT &rarr;
-            Sarvam LLM &rarr; Bulbul v3 (`ishita`) TTS.
+            Hold the button anytime to interrupt Nila mid-sentence (barge-in) and record your reply.
+            {bargeInCount > 0 ? ` · Barge-ins: ${bargeInCount}` : ''}
           </p>
         </div>
 
@@ -331,6 +369,14 @@ export function NilaVoiceTestPanel({
               className="px-3.5 py-2 rounded-lg bg-[#FBB61B] hover:bg-[#f0aa0c] text-xs font-bold text-[#0B1220] cursor-pointer"
             >
               Run All 3 Stages Together
+            </button>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => runStageTest('silence')}
+              className="px-3 py-2 rounded-lg border border-[#E2E8E2] bg-white hover:bg-slate-50 text-xs font-semibold text-[#0B1220] cursor-pointer"
+            >
+              Test 10s Silence
             </button>
           </div>
         </div>
@@ -409,36 +455,56 @@ export function NilaVoiceTestPanel({
       </div>
 
       {/* Audio Playback Stage */}
-      <div className="p-4 rounded-xl bg-[#F7F9F6] border border-[#E2E8E2] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase text-slate-700">
-              3. Bulbul v3 Audio Playback ({ttsLanguage} · speaker: {ttsSpeaker})
-            </span>
-            {tts && (
-              <span
-                className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                  tts.succeeded ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-900'
-                }`}
-              >
-                {tts.succeeded ? `PASS · ${tts.modelUsed} (${tts.latencyMs}ms)` : 'FAILED'}
+      <div className="p-4 rounded-xl bg-[#F7F9F6] border border-[#E2E8E2] space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase text-slate-700">
+                3. Voice preview (Sarvam Bulbul v3 · {tts?.speaker || ttsSpeaker})
               </span>
-            )}
-            {playbackStatus === 'succeeded' && (
-              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-[#149642]/15 text-[#0F7633]">
-                Audio Played
-              </span>
-            )}
+              {tts && (
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                    tts.succeeded ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-900'
+                  }`}
+                >
+                  {tts.succeeded ? `PASS · ${tts.modelUsed} (${tts.latencyMs}ms)` : 'FAILED'}
+                </span>
+              )}
+              {playbackStatus === 'interrupted' && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-900">
+                  Barge-In Stopped
+                </span>
+              )}
+              {playbackStatus === 'succeeded' && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-[#149642]/15 text-[#0F7633]">
+                  Audio Played
+                </span>
+              )}
+            </div>
+            {tts?.error && <p className="text-xs text-red-700 font-mono">{tts.error}</p>}
           </div>
-          {tts?.error && <p className="text-xs text-red-700 font-mono">{tts.error}</p>}
+
+          <audio
+            ref={audioElementRef}
+            controls
+            className="h-9 w-full sm:w-80"
+            onPlay={() => setPlaybackStatus('playing')}
+            onEnded={() => setPlaybackStatus('succeeded')}
+          />
         </div>
 
-        <audio
-          ref={audioElementRef}
-          controls
-          className="h-9 w-full sm:w-80"
-          onPlay={() => setPlaybackStatus('succeeded')}
-        />
+        <div className="pt-3 border-t border-[#E2E8E2] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="text-xs text-slate-600">
+            <strong className="text-[#0B1220]">Reference Voice Profile Loaded:</strong> Uploaded Karur
+            Tamil Reference Audio (<code className="font-mono">/audio/nila-reference-voice.mp3</code>)
+          </div>
+          <audio
+            src="/audio/nila-reference-voice.mp3"
+            controls
+            className="h-8 w-full sm:w-80"
+          />
+        </div>
       </div>
     </section>
   );

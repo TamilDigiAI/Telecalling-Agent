@@ -1,0 +1,23 @@
+# DigiAnchorZ Voice Reverse Proxy (Automatic HTTPS + WebSocket Upgrades)
+# Set CRM_DOMAIN and VOICE_DOMAIN in your server environment before running docker compose up -d.
+
+{$CRM_DOMAIN:crm.digianchorz.com} {
+	encode gzip zstd
+	reverse_proxy crm:3000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+{$VOICE_DOMAIN:voice.digianchorz.com} {
+	reverse_proxy nila-voice:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		transport http {
+			read_timeout 1h
+			write_timeout 1h
+		}
+	}
+}

@@ -1,9 +1,40 @@
+import Link from 'next/link';
 import { getProtectedPageContext } from '@/lib/auth/workspace-guard';
 import { listWorkspaceLeads } from '@/lib/crm/service';
-import { runMockOutboundCallAction, saveCallOutcomeAction } from '@/app/actions/crm';
-import { LiveNilaCallButton } from '@/components/leads/LiveNilaCallButton';
 import { GoogleSheetSyncButton } from '@/components/leads/GoogleSheetSyncButton';
+import { CallWithNilaButton } from '@/components/leads/CallWithNilaButton';
+import { isPilotTestContact } from '@/lib/pilot/test-contacts';
 import type { LeadTemperature } from '@/types/crm';
+
+function formatIst(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+function statusPillClass(temp: LeadTemperature, doNotCall: boolean): string {
+  if (doNotCall) return 'bg-red-100 text-red-900';
+  switch (temp) {
+    case 'HOT':
+      return 'bg-[#149642]/15 text-[#0F7633]';
+    case 'WARM':
+      return 'bg-[#FBB61B]/25 text-[#0B1220]';
+    case 'COLD':
+      return 'bg-slate-200 text-slate-700';
+    default:
+      return 'bg-slate-100 text-slate-600';
+  }
+}
 
 export default async function LeadsPage({
   searchParams,
@@ -28,40 +59,30 @@ export default async function LeadsPage({
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0B1220]">Leads &amp; Voice Qualification</h1>
-          <p className="text-sm text-slate-600">
-            Mock Telephony with Agent <strong>{workspace.agent_name}</strong> · Connected Sheet:{' '}
-            <a
-              href={workspace.google_sheet_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[#0F7633] underline font-mono text-xs"
-            >
-              {workspace.google_sheet_id}
-            </a>
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold text-[#0B1220]">Leads</h1>
         <GoogleSheetSyncButton sheetId={workspace.google_sheet_id} />
       </div>
 
-      <form method="get" className="bg-white border border-[#E2E8E2] rounded-xl p-4 flex flex-wrap gap-3">
+      <form
+        method="get"
+        className="bg-white border border-[#E2E8E2] rounded-xl p-3 flex flex-wrap gap-2.5"
+      >
         <input
           type="search"
           name="q"
           defaultValue={search ?? ''}
-          placeholder="Search name, phone (+91...), or Lead ID..."
-          className="flex-1 min-w-[220px] rounded-lg border border-[#E2E8E2] px-3 py-2 text-sm"
+          placeholder="Search name, phone, or Lead ID..."
+          className="flex-1 min-w-[200px] rounded-lg border border-[#E2E8E2] px-3 py-2 text-sm"
         />
         <select
           name="temperature"
           defaultValue={temperature ?? ''}
-          aria-label="Filter by Lead Temperature"
+          aria-label="Filter by Lead status"
           className="rounded-lg border border-[#E2E8E2] px-3 py-2 text-sm bg-white"
         >
-          <option value="">All Temperatures</option>
+          <option value="">All Statuses</option>
           <option value="HOT">HOT</option>
           <option value="WARM">WARM</option>
           <option value="COLD">COLD</option>
@@ -75,141 +96,100 @@ export default async function LeadsPage({
         </button>
       </form>
 
-      <div className="space-y-4">
-        {leads.map((lead) => (
-          <article
-            key={lead.id}
-            className="bg-white border border-[#E2E8E2] rounded-xl p-5 space-y-4"
-          >
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-lg font-bold text-[#0B1220]">{lead.full_name}</h2>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-[#F7F9F6] border border-[#E2E8E2]">
-                    {lead.external_lead_id}
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#149642]/15 text-[#0F7633]">
-                    Temperature: {lead.lead_temperature}
-                  </span>
-                  {lead.latest_call_outcome && (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FBB61B]/25 text-[#0B1220]">
-                      Outcome: {lead.latest_call_outcome}
+      {leads.length === 0 ? (
+        <div className="bg-white border border-[#E2E8E2] rounded-xl p-8 text-center text-sm text-slate-600">
+          No leads found. Click <strong>Sync Test Leads</strong> to import contacts from Google
+          Sheets.
+        </div>
+      ) : (
+        <div className="bg-white border border-[#E2E8E2] rounded-xl overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-[#E2E8E2] bg-[#F7F9F6] text-xs uppercase text-slate-600">
+                <th className="py-3 px-4 font-semibold">Name</th>
+                <th className="py-3 px-4 font-semibold">Phone</th>
+                <th className="py-3 px-4 font-semibold hidden md:table-cell">Service</th>
+                <th className="py-3 px-4 font-semibold">Lead status</th>
+                <th className="py-3 px-4 font-semibold hidden sm:table-cell">Next follow-up</th>
+                <th className="py-3 px-4 font-semibold text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E2E8E2]">
+              {leads.map((lead) => (
+                <tr key={lead.id} className="hover:bg-[#F7F9F6]/70 transition-colors">
+                  <td className="py-3.5 px-4">
+                    <Link
+                      href={`/leads/${lead.id}`}
+                      className="font-semibold text-[#0B1220] hover:text-[#149642] block"
+                    >
+                      {lead.full_name}
+                    </Link>
+                    {isPilotTestContact(lead.external_lead_id) && (
+                      <span className="inline-block mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded">
+                        Test Contact
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-3.5 px-4 font-mono text-xs text-slate-700 whitespace-nowrap">
+                    <Link href={`/leads/${lead.id}`} className="hover:underline">
+                      {lead.phone_e164}
+                    </Link>
+                  </td>
+                  <td className="py-3.5 px-4 text-xs text-slate-600 hidden md:table-cell max-w-[220px] truncate">
+                    {lead.service_interest}
+                  </td>
+                  <td className="py-3.5 px-4 whitespace-nowrap">
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusPillClass(
+                        lead.lead_temperature,
+                        lead.do_not_call
+                      )}`}
+                    >
+                      {lead.do_not_call ? 'Do Not Call' : lead.lead_temperature}
                     </span>
-                  )}
-                  {lead.do_not_call && (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-900">
-                      DO NOT CALL (Suppressed)
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs text-slate-600 mt-1">
-                  Phone: <strong className="font-mono">{lead.phone_e164}</strong> (raw:{' '}
-                  <code className="font-mono">{lead.raw_phone}</code>) · Service:{' '}
-                  <strong>{lead.service_interest}</strong> · Eligibility:{' '}
-                  <code className="font-mono">{lead.eligibility_reference}</code>
-                </div>
-              </div>
-
-              <div className="text-xs text-slate-600 md:text-right">
-                <div>Attempts: <strong>{lead.attempts_count}</strong></div>
-                <div>Sheet Sync: <strong>{lead.sync_status}</strong></div>
-                {lead.callback_at && (
-                  <div>
-                    Agreed Callback: <code className="font-mono">{lead.callback_at}</code>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {lead.call_summary && (
-              <div className="p-3 rounded-lg bg-[#F7F9F6] border border-[#E2E8E2] text-xs space-y-1">
-                <div className="font-semibold text-[#0B1220]">
-                  Latest Qualification Summary ({workspace.agent_name}):
-                </div>
-                <p className="text-slate-700">{lead.call_summary}</p>
-                {lead.qualification_reason && (
-                  <p className="text-slate-500">Reason: {lead.qualification_reason}</p>
-                )}
-              </div>
-            )}
-
-            <div className="pt-2 border-t border-[#E2E8E2] flex flex-wrap items-center gap-2">
-              <form action={saveCallOutcomeAction}>
-                <input type="hidden" name="leadId" value={lead.id} />
-                <input type="hidden" name="callOutcome" value="CALLBACK_REQUESTED" />
-                <input type="hidden" name="proposedTemperature" value="HOT" />
-                <input
-                  type="hidden"
-                  name="qualificationReason"
-                  value="Active Meta Ads requirement with confirmed founder callback tomorrow at 11:00 AM IST."
-                />
-                <input
-                  type="hidden"
-                  name="summary"
-                  value={`Agent ${workspace.agent_name} qualified ${lead.full_name} as HOT and scheduled 1 founder callback task.`}
-                />
-                <button
-                  type="submit"
-                  className="px-3.5 py-2 rounded-lg bg-[#0F7633] hover:bg-[#149642] text-white text-xs font-semibold cursor-pointer"
-                >
-                  Save HOT Call Outcome + Create 1 Callback Task
-                </button>
-              </form>
-
-              <form action={runMockOutboundCallAction}>
-                <input type="hidden" name="leadId" value={lead.id} />
-                <input type="hidden" name="scenario" value="WARM_INTEREST" />
-                <button
-                  type="submit"
-                  className="px-3 py-2 rounded-lg bg-[#FBB61B] text-[#0B1220] text-xs font-semibold cursor-pointer"
-                >
-                  Simulate WARM Call
-                </button>
-              </form>
-
-              <form action={runMockOutboundCallAction}>
-                <input type="hidden" name="leadId" value={lead.id} />
-                <input type="hidden" name="scenario" value="NO_ANSWER" />
-                <button
-                  type="submit"
-                  className="px-3 py-2 rounded-lg border border-[#E2E8E2] bg-white text-[#0B1220] text-xs font-semibold cursor-pointer"
-                >
-                  Simulate NO_ANSWER
-                </button>
-              </form>
-
-              <form action={runMockOutboundCallAction}>
-                <input type="hidden" name="leadId" value={lead.id} />
-                <input type="hidden" name="scenario" value="PRICING_NO_APPROVED_RATE" />
-                <button
-                  type="submit"
-                  className="px-3 py-2 rounded-lg border border-[#149642] bg-[#149642]/10 text-[#0F7633] text-xs font-semibold cursor-pointer"
-                >
-                  Simulate Pricing Question (No Approved Rate)
-                </button>
-              </form>
-
-              <form action={runMockOutboundCallAction}>
-                <input type="hidden" name="leadId" value={lead.id} />
-                <input type="hidden" name="scenario" value="OPT_OUT_DNC" />
-                <button
-                  type="submit"
-                  className="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-900 text-xs font-semibold cursor-pointer"
-                >
-                  Simulate Opt-Out (DNC)
-                </button>
-              </form>
-            </div>
-
-            <LiveNilaCallButton
-              leadId={lead.id}
-              phoneE164={lead.phone_e164}
-              fullName={lead.full_name}
-            />
-          </article>
-        ))}
-      </div>
+                  </td>
+                  <td className="py-3.5 px-4 text-xs text-slate-600 hidden sm:table-cell whitespace-nowrap">
+                    {formatIst(lead.callback_at)}
+                  </td>
+                  <td className="py-3.5 px-4">
+                    <div className="flex items-start justify-end gap-2">
+                      <CallWithNilaButton
+                        leadId={lead.id}
+                        phoneE164={lead.phone_e164}
+                        eligible={lead.calling_eligibility === 'ELIGIBLE'}
+                        doNotCall={lead.do_not_call}
+                        compact
+                      />
+                      <details className="relative">
+                        <summary
+                          aria-label={`More actions for ${lead.full_name}`}
+                          className="list-none px-2.5 py-1.5 rounded-lg border border-[#E2E8E2] bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer select-none"
+                        >
+                          More
+                        </summary>
+                        <div className="absolute right-0 mt-1 w-40 bg-white border border-[#E2E8E2] rounded-lg shadow-md py-1 z-20 text-xs">
+                          <Link
+                            href={`/leads/${lead.id}`}
+                            className="block px-3 py-2 text-[#0B1220] hover:bg-[#F7F9F6]"
+                          >
+                            View Lead Details
+                          </Link>
+                          <Link
+                            href={`/assistant?leadId=${lead.id}`}
+                            className="block px-3 py-2 text-[#0B1220] hover:bg-[#F7F9F6]"
+                          >
+                            Schedule Follow-up
+                          </Link>
+                        </div>
+                      </details>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
-

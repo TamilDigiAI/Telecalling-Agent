@@ -12,7 +12,7 @@ describe('Nila Voice Test · Sarvam Saaras v4 + sarvam-105b-conversations + Bulb
     expect(env.sarvamSttModel).toBe('saaras:v4');
     expect(env.sarvamSttMode).toBe('codemix');
     expect(env.sarvamTtsModel).toBe('bulbul:v3');
-    expect(env.sarvamTtsSpeaker).toBe('ishita');
+    expect(env.sarvamTtsSpeaker).toBe('ritu');
     expect(env.sarvamTtsLanguage).toBe('ta-IN');
     expect(env.llmProvider).toBe('sarvam');
     expect(env.llmModel).toBe('sarvam-105b-conversations');
@@ -81,7 +81,7 @@ describe('Nila Voice Test · Sarvam Saaras v4 + sarvam-105b-conversations + Bulb
       expect(result.dialogue.modelUsed).toBe('sarvam-105b-conversations');
       expect(result.dialogue.replyText).toContain('11 AM');
       expect(result.tts.modelUsed).toBe('bulbul:v3');
-      expect(result.tts.speaker).toBe('ishita');
+      expect(result.tts.speaker).toBe('ritu');
       expect(result.tts.languageCode).toBe('ta-IN');
     } finally {
       fetchSpy.mockRestore();

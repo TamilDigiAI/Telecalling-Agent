@@ -19,3 +19,4 @@ DigiAnchorZ-Voice-SaaS/
 next-env.d.ts
 .vercel
 coverage/
+.n8n-data/

@@ -6,11 +6,25 @@ import {
 } from '@/lib/supabase/local-pilot-fallback';
 
 function getRequestOrigin(request: NextRequest): string {
+  const originHeader = request.headers.get('origin');
+  if (originHeader && originHeader.startsWith('http') && !originHeader.includes('0.0.0.0')) {
+    return originHeader.replace(/\/+$/, '');
+  }
+  const refererHeader = request.headers.get('referer');
+  if (refererHeader && refererHeader.startsWith('http') && !refererHeader.includes('0.0.0.0')) {
+    try {
+      return new URL(refererHeader).origin;
+    } catch {
+      // fall through
+    }
+  }
   const host =
     request.headers.get('x-forwarded-host') ||
     request.headers.get('host') ||
     'localhost:3000';
-  const proto = request.headers.get('x-forwarded-proto') || 'http';
+  const proto =
+    request.headers.get('x-forwarded-proto') ||
+    (host.endsWith('.lhr.life') || host.endsWith('.vercel.app') ? 'https' : 'http');
   const safeHost = host.startsWith('0.0.0.0')
     ? host.replace('0.0.0.0', 'localhost')
     : host;

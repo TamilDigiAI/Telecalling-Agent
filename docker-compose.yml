@@ -1,0 +1,84 @@
+services:
+  crm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: digianchorz-crm
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      APP_TIMEZONE: "Asia/Kolkata"
+      VOICE_INTERNAL_BASE_URL: "http://nila-voice:8080"
+    expose:
+      - "3000"
+    depends_on:
+      nila-voice:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 15s
+    networks:
+      - digianchorz_net
+
+  nila-voice:
+    build:
+      context: ./services/nila-voice
+      dockerfile: Dockerfile
+    container_name: digianchorz-nila-voice
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      APP_TIMEZONE: "Asia/Kolkata"
+      RECORDINGS_ENABLED: "false"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 15s
+    networks:
+      - digianchorz_net
+
+  caddy:
+    image: caddy:2.9.1-alpine
+    container_name: digianchorz-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CRM_DOMAIN: "${CRM_DOMAIN:-crm.digianchorz.com}"
+      VOICE_DOMAIN: "${VOICE_DOMAIN:-voice.digianchorz.com}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      crm:
+        condition: service_healthy
+      nila-voice:
+        condition: service_healthy
+    networks:
+      - digianchorz_net
+
+networks:
+  digianchorz_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,17 @@
+.git
+.gitignore
+.next
+.n8n-data
+.env
+.env.local
+.env.*.local
+.env.production
+node_modules
+services/nila-voice/node_modules
+services/nila-voice/dist
+DigiAnchorZ-Voice-SaaS
+DigiAnchorZ-Voice-SaaS.zip
+tests
+scripts
+*.tsbuildinfo
+*.log

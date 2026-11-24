@@ -105,6 +105,9 @@ export interface Lead {
   sync_status: SyncStatus;
   last_synced_at: string | null;
   sync_error: string | null;
+  row_bound_key?: string | null;
+  flagged_for_review?: boolean;
+  review_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -120,14 +123,22 @@ export interface StructuredCallExtraction {
   invented_quote?: string | null;
 }
 
+export type TelephonyProviderId = 'vobiz_live' | 'vobiz_mock' | 'exotel_mock' | 'exotel_live';
+
 export interface CallAttempt {
   id: string;
   workspace_id: string;
   lead_id: string;
   attempt_number: number;
   agent_name: string;
-  provider: 'exotel_mock' | 'exotel_live';
+  provider: TelephonyProviderId;
   provider_call_sid: string | null;
+  provider_request_uuid?: string | null;
+  provider_account_id?: string | null;
+  provider_raw_status?: string | null;
+  provider_error_code?: string | null;
+  reconciliation_required?: boolean;
+  idempotency_key?: string | null;
   direction: 'OUTBOUND' | 'INBOUND';
   status: CallAttemptStatus;
   call_outcome: CallOutcome | null;
@@ -224,5 +235,45 @@ export interface RecordCallOutcomeResult {
   applied_temperature: LeadTemperature;
   call_outcome: CallOutcome;
   slot_verified?: boolean;
+}
+
+export type CallQueueJobStatus =
+  | 'PENDING'
+  | 'CLAIMED'
+  | 'DIALING'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'FAILED'
+  | 'RECONCILING';
+
+export interface CallQueueJob {
+  id: string;
+  workspace_id: string;
+  lead_id: string;
+  status: CallQueueJobStatus;
+  idempotency_key: string;
+  scheduled_for: string;
+  locked_by: string | null;
+  lease_expires_at: string | null;
+  attempts: number;
+  max_attempts: number;
+  call_attempt_id: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntegrationErrorRecord {
+  id: string;
+  workspace_id: string;
+  source: 'n8n' | 'vobiz' | 'sarvam' | 'google_sheets' | 'supabase';
+  workflow_name: string | null;
+  execution_id: string | null;
+  node_name: string | null;
+  error_code: string | null;
+  sanitized_message: string;
+  metadata: Record<string, unknown>;
+  resolved: boolean;
+  created_at: string;
 }
 

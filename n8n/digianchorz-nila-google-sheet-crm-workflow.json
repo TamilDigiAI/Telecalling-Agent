@@ -1,0 +1,393 @@
+{
+  "id": "digianchorzNila01",
+  "name": "DigiAnchorZ · Google Sheet -> Nila Picks Exotel (09513886363) -> Call Qualified Lead -> CRM & Sheet -> Follow-Up Loop",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1X9sQhlRx_7jo1c6gZ8SBxNas5aqqRjgAY0-UzOUB97A",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "id": "node-google-sheets-trigger",
+      "name": "1. Google Sheets Trigger (New Lead Row)",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "digianchorz-lead-form",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "1b. Instant Lead Form / Follow-Up Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        440
+      ],
+      "webhookId": "digianchorz-lead-form"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-phone-not-empty",
+              "leftValue": "={{ $json['Phone'] || $json['phone'] || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "cond-not-dnc",
+              "leftValue": "={{ String($json['Do Not Call'] || 'FALSE').toUpperCase() }}",
+              "rightValue": "TRUE",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond-attempts-under-limit",
+              "leftValue": "={{ Number($json['Attempts'] || $json.attemptNumber || 0) }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-qualify-lead",
+      "name": "2. Qualify Lead & Verify Mobile (DNC != TRUE, Attempts < 3)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        500,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/webhooks/n8n/exotel-dial",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"Lead ID\": {{ JSON.stringify($json[\"Lead ID\"] || $json.leadId || \"\") }},\n  \"Name\": {{ JSON.stringify($json[\"Name\"] || $json.fullName || \"Google Sheet Lead\") }},\n  \"Phone\": {{ JSON.stringify($json[\"Phone\"] || $json.phone || \"\") }},\n  \"Service\": {{ JSON.stringify($json[\"Service\"] || $json.service || \"Meta Ads for Facebook and Instagram lead generation\") }},\n  \"Source\": {{ JSON.stringify($json[\"Source\"] || $json.source || \"Google Sheet (n8n)\") }},\n  \"Calling Eligibility\": {{ JSON.stringify($json[\"Calling Eligibility\"] || \"ELIGIBLE\") }},\n  \"Eligibility Reference\": {{ JSON.stringify($json[\"Eligibility Reference\"] || \"N8N-LEAD-FORM\") }},\n  \"Do Not Call\": {{ JSON.stringify($json[\"Do Not Call\"] || \"FALSE\") }},\n  \"row_number\": {{ Number($json.row_number || 2) }},\n  \"exotelAccountSid\": \"digianchorz1\",\n  \"exotelCallerId\": \"09513886363\",\n  \"exotelAppId\": \"1370873\",\n  \"isFollowUpRetry\": {{ Boolean($json.followUpLoop && $json.followUpLoop.needsFollowUpAgain) }},\n  \"attemptNumber\": {{ Number(($json.followUpLoop && $json.followUpLoop.nextAttemptNumber) || $json.Attempts || 1) }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node-nila-picks-exotel",
+      "name": "3. Nila Picks Exotel Number (09513886363) & Calls Qualified Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/webhooks/n8n/lead-intake",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"Lead ID\": {{ JSON.stringify($json[\"Lead ID\"] || $json.leadId || \"\") }},\n  \"Name\": {{ JSON.stringify($json[\"Name\"] || $json.fullName || \"Google Sheet Lead\") }},\n  \"Phone\": {{ JSON.stringify($json[\"Phone\"] || $json.phone || \"\") }},\n  \"Service\": {{ JSON.stringify($json[\"Service\"] || $json.service || \"Meta Ads for Facebook and Instagram lead generation\") }},\n  \"Source\": {{ JSON.stringify($json[\"Source\"] || $json.source || \"Google Sheet (n8n)\") }},\n  \"Calling Eligibility\": {{ JSON.stringify($json[\"Calling Eligibility\"] || \"ELIGIBLE\") }},\n  \"Eligibility Reference\": {{ JSON.stringify($json[\"Eligibility Reference\"] || \"N8N-LEAD-FORM\") }},\n  \"Do Not Call\": {{ JSON.stringify($json[\"Do Not Call\"] || \"FALSE\") }},\n  \"row_number\": {{ Number($json.row_number || 2) }},\n  \"exotelPicked\": {{ JSON.stringify($json.exotelPicked || null) }}\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "node-call-nila-and-crm",
+      "name": "4. Nila Voice Qualification & Update CRM Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1X9sQhlRx_7jo1c6gZ8SBxNas5aqqRjgAY0-UzOUB97A",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Lead ID": "={{ $json.sheetWriteBackRow['Lead ID'] }}",
+            "Name": "={{ $json.sheetWriteBackRow['Name'] }}",
+            "Phone": "={{ $json.sheetWriteBackRow['Phone'] }}",
+            "Service": "={{ $json.sheetWriteBackRow['Service'] }}",
+            "Source": "={{ $json.sheetWriteBackRow['Source'] }}",
+            "Calling Eligibility": "={{ $json.sheetWriteBackRow['Calling Eligibility'] }}",
+            "Eligibility Reference": "={{ $json.sheetWriteBackRow['Eligibility Reference'] }}",
+            "Do Not Call": "={{ $json.sheetWriteBackRow['Do Not Call'] }}",
+            "CRM Lead ID": "={{ $json.sheetWriteBackRow['CRM Lead ID'] }}",
+            "Call Outcome": "={{ $json.sheetWriteBackRow['Call Outcome'] }}",
+            "Lead Temperature": "={{ $json.sheetWriteBackRow['Lead Temperature'] }}",
+            "Qualification Reason": "={{ $json.sheetWriteBackRow['Qualification Reason'] }}",
+            "Call Summary": "={{ $json.sheetWriteBackRow['Call Summary'] }}",
+            "Last Call At": "={{ $json.sheetWriteBackRow['Last Call At'] }}",
+            "Callback At": "={{ $json.sheetWriteBackRow['Callback At'] }}",
+            "Attempts": "={{ $json.sheetWriteBackRow['Attempts'] }}",
+            "Sync Status": "={{ $json.sheetWriteBackRow['Sync Status'] }}",
+            "Last Synced At": "={{ $json.sheetWriteBackRow['Last Synced At'] }}",
+            "Automation Do Not Call": "={{ $json.sheetWriteBackRow['Automation Do Not Call'] }}"
+          },
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "schema": [
+            { "id": "Lead ID", "displayName": "Lead ID", "required": false, "defaultMatch": true, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Name", "displayName": "Name", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Phone", "displayName": "Phone", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Service", "displayName": "Service", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Source", "displayName": "Source", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Calling Eligibility", "displayName": "Calling Eligibility", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Eligibility Reference", "displayName": "Eligibility Reference", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Do Not Call", "displayName": "Do Not Call", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "CRM Lead ID", "displayName": "CRM Lead ID", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Call Outcome", "displayName": "Call Outcome", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Lead Temperature", "displayName": "Lead Temperature", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Qualification Reason", "displayName": "Qualification Reason", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Call Summary", "displayName": "Call Summary", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Last Call At", "displayName": "Last Call At", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Callback At", "displayName": "Callback At", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Attempts", "displayName": "Attempts", "required": false, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false },
+            { "id": "Sync Status", "displayName": "Sync Status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Last Synced At", "displayName": "Last Synced At", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Automation Do Not Call", "displayName": "Automation Do Not Call", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-google-sheets-writeback",
+      "name": "5. Update Google Sheet Row (Outcome, Temp & Callback)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-needs-followup",
+              "leftValue": "={{ ['CALLBACK_REQUESTED', 'NO_ANSWER', 'BUSY'].includes(String($json['Call Outcome'] || '')) || String($json['Lead Temperature'] || '') === 'WARM' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-followup-attempts",
+              "leftValue": "={{ Number($json['Attempts'] || 1) }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            },
+            {
+              "id": "cond-followup-not-dnc",
+              "leftValue": "={{ String($json['Do Not Call'] || 'FALSE').toUpperCase() }}",
+              "rightValue": "TRUE",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-check-followup-needed",
+      "name": "6. Needs Follow-Up Call Again? (Callback / Warm / No Answer)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "hours"
+      },
+      "id": "node-wait-followup-window",
+      "name": "7. Wait for Follow-Up Window & Loop Back to Nila -> Exotel -> CRM -> Sheet",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        620
+      ],
+      "webhookId": "digianchorz-followup-wait"
+    }
+  ],
+  "connections": {
+    "1. Google Sheets Trigger (New Lead Row)": {
+      "main": [
+        [
+          {
+            "node": "2. Qualify Lead & Verify Mobile (DNC != TRUE, Attempts < 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1b. Instant Lead Form / Follow-Up Webhook": {
+      "main": [
+        [
+          {
+            "node": "2. Qualify Lead & Verify Mobile (DNC != TRUE, Attempts < 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Qualify Lead & Verify Mobile (DNC != TRUE, Attempts < 3)": {
+      "main": [
+        [
+          {
+            "node": "3. Nila Picks Exotel Number (09513886363) & Calls Qualified Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Nila Picks Exotel Number (09513886363) & Calls Qualified Lead": {
+      "main": [
+        [
+          {
+            "node": "4. Nila Voice Qualification & Update CRM Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Nila Voice Qualification & Update CRM Dashboard": {
+      "main": [
+        [
+          {
+            "node": "5. Update Google Sheet Row (Outcome, Temp & Callback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Update Google Sheet Row (Outcome, Temp & Callback)": {
+      "main": [
+        [
+          {
+            "node": "6. Needs Follow-Up Call Again? (Callback / Warm / No Answer)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Needs Follow-Up Call Again? (Callback / Warm / No Answer)": {
+      "main": [
+        [
+          {
+            "node": "7. Wait for Follow-Up Window & Loop Back to Nila -> Exotel -> CRM -> Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Wait for Follow-Up Window & Loop Back to Nila -> Exotel -> CRM -> Sheet": {
+      "main": [
+        [
+          {
+            "node": "3. Nila Picks Exotel Number (09513886363) & Calls Qualified Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

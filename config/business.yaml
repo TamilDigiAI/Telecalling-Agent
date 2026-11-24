@@ -1,0 +1,70 @@
+# DigiAnchorZ AI Voice Assistant Business Configuration
+# Rule: Agent MUST only use facts defined here and NEVER invent prices, slots, addresses, or guarantees.
+
+business:
+  name: "DigiAnchorZ"
+  type: "digital marketing agency"
+  city: "Karur"
+  founder: "Tamilselvan Marimuthu"
+  address: "Room No 4, 2nd Floor, Vinayaga Complex, Thanthoni, Karur"
+  phone: "094455 81778"
+  website: "digianchorz.com"
+  assistant_name: "Nila"
+  greeting_ta: "Vanakkam, DigiAnchorZ-oda AI assistant. Enna help venum?"
+
+services:
+  - "Meta Ads"
+  - "Google Ads"
+  - "SEO"
+  - "social media management"
+  - "Google Business Profile"
+  - "website"
+  - "landing page"
+  - "video/reels"
+  - "branding"
+  - "lead generation"
+  - "AI agents"
+
+pricing:
+  allow_final_price: false
+  allow_discount: false
+  rule: "Final price solla koodadhu. Call-ku apram team custom quote anuppuvaanga nu sollanum."
+  standard_reply_ta: "Call-ku apram team custom quote anuppuvaanga. Discovery call book pannalaama?"
+  discount_reply_ta: "Discount promise panna mudiyaadhu. Team callback arrange pannuren, avanga details pesuvaanga."
+
+guarantees:
+  allow_result_guarantee: false
+  standard_reply_ta: "Guarantee solla mudiyaadhu. Ungaloda goal pathi call-la team pesuvaanga."
+
+timings:
+  timezone: "Asia/Kolkata"
+  # Replace with your real business timings
+  working_hours: "Mon-Sat, 10:00 AM - 7:00 PM IST"
+  # Booked / unavailable slots for tomorrow (agent must say slot is full and suggest nearest free slot)
+  booked_slots_tomorrow:
+    - "10:00 AM"
+  # Replace with tomorrow's real free slots
+  free_slots_tomorrow:
+    - "11:00 AM"
+    - "11:30 AM"
+    - "3:00 PM"
+    - "4:30 PM"
+
+transfer:
+  manager_name: "Tamilselvan Marimuthu"
+  # Replace with your real transfer number if different from office phone
+  transfer_number: "094455 81778"
+  fallback_action: "Take caller callback number and arrange manager callback without arguing."
+
+silence_handling:
+  timeout_seconds: 10
+  prompt_ta: "Hello, kekkudha? Ippo busy-aa irundhaa, team callback arrange pannattuma?"
+
+guardrails:
+  never_invent_facts: true
+  one_short_question_per_turn: true
+  never_claim_human: true
+  auto_book_without_confirmation: false
+  match_caller_language: true
+  refuse_prompt_injection: true
+  wrong_number_close_immediately: true

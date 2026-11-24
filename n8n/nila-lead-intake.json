@@ -1,0 +1,127 @@
+{
+  "name": "Nila — Lead Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger-intake",
+      "name": "Every 2 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1X9sQhlRx_7jo1c6gZ8SBxNas5aqqRjgAY0-UzOUB97A",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "options": {
+          "valueRenderMode": "UNFORMATTED_VALUE"
+        }
+      },
+      "id": "google-sheets-get-rows",
+      "name": "Google Sheets — Get Rows (Leads)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "DigiAnchorZ Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read actual headers dynamically and preserve phone numbers as text.\nconst items = $input.all();\nconst rows = items.map((item, idx) => {\n  const j = item.json || {};\n  const getByHeader = (candidates) => {\n    for (const key of Object.keys(j)) {\n      const norm = key.trim().toLowerCase();\n      if (candidates.includes(norm)) return j[key];\n    }\n    return '';\n  };\n  return {\n    row_number: Number(j.row_number || idx + 2),\n    'Lead ID': String(getByHeader(['lead id', 'lead_id', 'external_lead_id']) ?? '').trim(),\n    Name: String(getByHeader(['name', 'full name', 'full_name']) ?? '').trim(),\n    Phone: String(getByHeader(['phone', 'mobile', 'phone number']) ?? '').trim(),\n    Service: String(getByHeader(['service', 'service interest', 'enquiry']) ?? '').trim(),\n    Source: String(getByHeader(['source']) ?? 'Google Sheet').trim(),\n    'Created At': String(getByHeader(['created at', 'created_at']) ?? '').trim(),\n    'Calling Eligibility': String(getByHeader(['calling eligibility', 'calling_eligibility']) ?? 'ELIGIBLE').trim(),\n    'Eligibility Reference': String(getByHeader(['eligibility reference', 'eligibility_reference']) ?? '').trim(),\n    'Do Not Call': String(getByHeader(['do not call', 'do_not_call', 'dnc']) ?? 'FALSE').trim(),\n  };\n}).filter((r) => r.Phone !== '');\n\nreturn [{ json: { workspaceSlug: 'digianchorz', autoEnqueueCalls: false, rows } }];"
+      },
+      "id": "map-fields-intake",
+      "name": "Map Intake Columns (A:I)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CRM_BASE_URL || 'http://localhost:3000'}}/api/n8n/lead-import",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "http-lead-import",
+      "name": "POST CRM Lead Import",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_BACKEND_AUTH_CREDENTIAL_ID",
+          "name": "DigiAnchorZ CRM Backend Secret (x-n8n-webhook-secret)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets — Get Rows (Leads)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets — Get Rows (Leads)": {
+      "main": [
+        [
+          {
+            "node": "Map Intake Columns (A:I)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Intake Columns (A:I)": {
+      "main": [
+        [
+          {
+            "node": "POST CRM Lead Import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "Nila — Integration Errors",
+    "timezone": "Asia/Kolkata"
+  },
+  "active": false
+}

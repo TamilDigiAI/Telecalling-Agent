@@ -7,6 +7,7 @@ export const DEFAULT_VOICE_AGENT_NAME = 'Nila';
 export const DEFAULT_WORKSPACE_SLUG = 'digianchorz';
 export const DEFAULT_WORKSPACE_NAME = 'DigiAnchorZ';
 export const DEFAULT_TIMEZONE = 'Asia/Kolkata';
+export const DEFAULT_VOBIZ_API_BASE_URL = 'https://api.vobiz.ai';
 
 const publicEnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
@@ -19,6 +20,7 @@ export interface RuntimeEnvConfig {
   telephonyProviderMode: 'mock' | 'live';
   appBaseUrl: string;
   voicePublicBaseUrl: string;
+  n8nBaseUrl: string;
   appTimezone: string;
   defaultWorkspaceSlug: string;
   defaultWorkspaceName: string;
@@ -32,6 +34,9 @@ export interface RuntimeEnvConfig {
   googleSheetId: string;
   googleSheetUrl: string;
   googleSheetTab: string;
+  vobizApiBaseUrl: string;
+  vobizPhoneNumber: string;
+  vobizHostVerified: boolean;
   sarvamSttModel: string;
   sarvamSttMode: string;
   sarvamTtsModel: string;
@@ -41,9 +46,25 @@ export interface RuntimeEnvConfig {
   llmModel: string;
   llmBaseUrl: string;
   isSupabaseConfigured: boolean;
+  isVobizCredentialsConfigured: boolean;
   isExotelCredentialsConfigured: boolean;
   isTwilioCredentialsConfigured: boolean;
   isSarvamConfigured: boolean;
+  isN8nConfigured: boolean;
+  isGoogleSheetsApiConfigured: boolean;
+}
+
+export function isVerifiedVobizHostname(baseUrl: string): boolean {
+  try {
+    const parsed = new URL(baseUrl);
+    const host = parsed.hostname.toLowerCase();
+    return (
+      parsed.protocol === 'https:' &&
+      (host === 'api.vobiz.ai' || host.endsWith('.vobiz.ai') || host === 'vobiz.ai')
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function getPublicSupabaseConfig(): {
@@ -87,9 +108,52 @@ export function getServerSarvamApiKey(): string {
   return key;
 }
 
+/**
+ * Server-only helper returning Vobiz credentials and verified API base URL.
+ * Never import or expose in client components.
+ */
+export function getServerVobizConfig(): {
+  authId: string;
+  authToken: string;
+  phoneNumber: string;
+  apiBaseUrl: string;
+  appId: string;
+  isConfigured: boolean;
+  hostVerified: boolean;
+} {
+  const authId = process.env.VOBIZ_AUTH_ID?.trim() || '';
+  const authToken = process.env.VOBIZ_AUTH_TOKEN?.trim() || '';
+  const phoneNumber = process.env.VOBIZ_PHONE_NUMBER?.trim() || '';
+  const apiBaseUrl = (
+    process.env.VOBIZ_API_BASE_URL?.trim() || DEFAULT_VOBIZ_API_BASE_URL
+  ).replace(/\/+$/, '');
+  const appId = process.env.VOBIZ_APP_ID?.trim() || '';
+  const hostVerified = isVerifiedVobizHostname(apiBaseUrl);
+
+  const isConfigured = Boolean(
+    authId &&
+      authToken &&
+      phoneNumber &&
+      !authId.includes('your_vobiz') &&
+      !authToken.includes('your_vobiz') &&
+      hostVerified
+  );
+
+  return {
+    authId,
+    authToken,
+    phoneNumber,
+    apiBaseUrl,
+    appId,
+    isConfigured,
+    hostVerified,
+  };
+}
+
 export function getRuntimeEnv(): RuntimeEnvConfig {
   const supa = getPublicSupabaseConfig();
   const appBaseUrl = process.env.APP_BASE_URL?.trim() || 'http://localhost:3000';
+  const vobiz = getServerVobizConfig();
 
   const exotelKey = process.env.EXOTEL_API_KEY?.trim() || '';
   const exotelToken = process.env.EXOTEL_API_TOKEN?.trim() || '';
@@ -113,11 +177,24 @@ export function getRuntimeEnv(): RuntimeEnvConfig {
   const sarvamKey = process.env.SARVAM_API_KEY?.trim() || '';
   const isSarvamConfigured = Boolean(sarvamKey && sarvamKey !== 'your_sarvam_api_key');
 
+  const n8nBaseUrl = (process.env.N8N_BASE_URL?.trim() || '').replace(/\/+$/, '');
+  const isN8nConfigured = Boolean(n8nBaseUrl && !n8nBaseUrl.includes('placeholder'));
+
+  const gsaEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() || '';
+  const gsaKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.trim() || '';
+  const isGoogleSheetsApiConfigured = Boolean(
+    gsaEmail &&
+      gsaKey &&
+      !gsaEmail.includes('your-service-account') &&
+      !gsaKey.includes('YOUR_PRIVATE_KEY')
+  );
+
   return {
     appMode: process.env.APP_MODE === 'pilot' ? 'pilot' : 'mock',
     telephonyProviderMode: process.env.TELEPHONY_PROVIDER_MODE === 'live' ? 'live' : 'mock',
     appBaseUrl,
-    voicePublicBaseUrl: process.env.VOICE_PUBLIC_BASE_URL?.trim() || appBaseUrl,
+    voicePublicBaseUrl: (process.env.VOICE_PUBLIC_BASE_URL?.trim() || appBaseUrl).replace(/\/+$/, ''),
+    n8nBaseUrl,
     appTimezone: process.env.APP_TIMEZONE?.trim() || DEFAULT_TIMEZONE,
     defaultWorkspaceSlug: process.env.DEFAULT_WORKSPACE_SLUG?.trim() || DEFAULT_WORKSPACE_SLUG,
     defaultWorkspaceName: process.env.DEFAULT_WORKSPACE_NAME?.trim() || DEFAULT_WORKSPACE_NAME,
@@ -135,17 +212,23 @@ export function getRuntimeEnv(): RuntimeEnvConfig {
     googleSheetId: process.env.GOOGLE_SHEET_ID?.trim() || DEFAULT_GOOGLE_SHEET_ID,
     googleSheetUrl: process.env.GOOGLE_SHEET_URL?.trim() || DEFAULT_GOOGLE_SHEET_URL,
     googleSheetTab: process.env.GOOGLE_SHEET_TAB?.trim() || 'Leads',
+    vobizApiBaseUrl: vobiz.apiBaseUrl,
+    vobizPhoneNumber: vobiz.phoneNumber,
+    vobizHostVerified: vobiz.hostVerified,
     sarvamSttModel: process.env.SARVAM_STT_MODEL?.trim() || 'saaras:v4',
     sarvamSttMode: process.env.SARVAM_STT_MODE?.trim() || 'codemix',
     sarvamTtsModel: process.env.SARVAM_TTS_MODEL?.trim() || 'bulbul:v3',
-    sarvamTtsSpeaker: process.env.SARVAM_TTS_SPEAKER?.trim() || 'ishita',
+    sarvamTtsSpeaker: process.env.SARVAM_TTS_SPEAKER?.trim() || 'ritu',
     sarvamTtsLanguage: process.env.SARVAM_TTS_LANGUAGE?.trim() || 'ta-IN',
     llmProvider: process.env.LLM_PROVIDER?.trim() || 'sarvam',
     llmModel: process.env.LLM_MODEL?.trim() || 'sarvam-105b-conversations',
     llmBaseUrl: process.env.LLM_BASE_URL?.trim() || 'https://api.sarvam.ai/v1',
     isSupabaseConfigured: supa.isConfigured,
+    isVobizCredentialsConfigured: vobiz.isConfigured,
     isExotelCredentialsConfigured,
     isTwilioCredentialsConfigured,
     isSarvamConfigured,
+    isN8nConfigured,
+    isGoogleSheetsApiConfigured,
   };
 }

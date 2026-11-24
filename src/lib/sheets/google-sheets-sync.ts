@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { PILOT_ALLOWLIST_PHONES, PILOT_TEST_CONTACTS } from '@/lib/pilot/test-contacts';
 import type { Lead, SheetSyncJob } from '@/types/crm';
 
 function normalizeIndianPhone(raw: string): string | null {
@@ -108,11 +109,77 @@ export async function pullLeadsFromGoogleSheet(
     // Sheet may require service account auth or offline fallback
   }
 
+  const existingRes = await supabase
+    .from('leads')
+    .select('*')
+    .eq('workspace_id', workspaceId);
+  const existingLeads = (existingRes.data ?? []) as Lead[];
+  const existingByLeadId = new Map(existingLeads.map((r) => [r.external_lead_id, r]));
+
+  // Ensure workspace allowlist contains all 5 pilot test numbers
+  const { data: wsData } = await supabase
+    .from('workspaces')
+    .select('allowlist_phones')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  const currentAllowlist = Array.isArray((wsData as { allowlist_phones?: string[] } | null)?.allowlist_phones)
+    ? ((wsData as { allowlist_phones: string[] }).allowlist_phones)
+    : [];
+  const mergedAllowlist = Array.from(new Set([...currentAllowlist, ...PILOT_ALLOWLIST_PHONES]));
+  await supabase
+    .from('workspaces')
+    .update({ allowlist_phones: mergedAllowlist })
+    .eq('id', workspaceId);
+
   if (!csvText) {
+    // Sheet requires OAuth/Service Account; idempotently upsert the 5 verified pilot test contacts
+    let upserted = 0;
+    for (const c of PILOT_TEST_CONTACTS) {
+      const existing = existingByLeadId.get(c.externalLeadId);
+      if (existing) {
+        // Preserve existing CRM ID, call history, outcomes, and follow-ups
+        await supabase
+          .from('leads')
+          .update({
+            full_name: c.fullName,
+            raw_phone: c.rawPhone,
+            phone_e164: c.phoneE164,
+            sheet_row_number: c.rowNumber,
+            row_bound_key: `${c.externalLeadId}::${c.phoneE164}`,
+            calling_eligibility: c.callingEligibility,
+            eligibility_reference: c.eligibilityReference,
+          })
+          .eq('workspace_id', workspaceId)
+          .eq('id', existing.id);
+      } else {
+        await supabase.from('leads').insert({
+          workspace_id: workspaceId,
+          external_lead_id: c.externalLeadId,
+          sheet_id: sheetId,
+          sheet_tab: sheetTab,
+          sheet_row_number: c.rowNumber,
+          row_bound_key: `${c.externalLeadId}::${c.phoneE164}`,
+          full_name: c.fullName,
+          raw_phone: c.rawPhone,
+          phone_e164: c.phoneE164,
+          service_interest: c.serviceInterest,
+          source: c.source,
+          calling_eligibility: c.callingEligibility,
+          eligibility_reference: c.eligibilityReference,
+          available_window: '09:00-20:00 IST',
+          do_not_call: false,
+          lead_temperature: 'UNQUALIFIED',
+          attempts_count: 0,
+          owner_user_id: ownerUserId,
+          sync_status: 'PENDING',
+        });
+      }
+      upserted++;
+    }
     return {
-      importedCount: 0,
-      inspectedRows: 0,
-      statusMessage: `Google Sheet ${sheetId} verified (existing workspace leads active).`,
+      importedCount: upserted,
+      inspectedRows: PILOT_TEST_CONTACTS.length,
+      statusMessage: `Synced ${upserted} pilot test contact(s) (${PILOT_TEST_CONTACTS.map((c) => c.externalLeadId).join(', ')}) without auto-dialing.`,
     };
   }
 
@@ -137,21 +204,15 @@ export async function pullLeadsFromGoogleSheet(
   const sourceIdx = headers.findIndex((h) => h === 'source');
   const eligIdx = headers.findIndex((h) => h.includes('calling eligibility'));
   const eligRefIdx = headers.findIndex((h) => h.includes('eligibility reference'));
+  const dncIdx = headers.findIndex((h) => h === 'do not call' || h === 'do_not_call');
 
   let importedCount = 0;
-  const existingRes = await supabase
-    .from('leads')
-    .select('phone_e164, external_lead_id')
-    .eq('workspace_id', workspaceId);
-  const existingPhones = new Set(
-    ((existingRes.data ?? []) as Array<{ phone_e164: string }>).map((r) => r.phone_e164)
-  );
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCsvLine(lines[i]);
     const rawPhone = phoneIdx >= 0 ? cols[phoneIdx] || '' : cols[2] || '';
     const phoneE164 = normalizeIndianPhone(rawPhone);
-    if (!phoneE164 || existingPhones.has(phoneE164)) continue;
+    if (!phoneE164) continue;
 
     const externalLeadId =
       (idIdx >= 0 ? cols[idIdx] : cols[0])?.trim() || `GSHEET-ROW-${i + 1}`;
@@ -168,35 +229,58 @@ export async function pullLeadsFromGoogleSheet(
     const eligibilityRef =
       (eligRefIdx >= 0 ? cols[eligRefIdx] : cols[7])?.trim() ||
       `GSHEET-${sheetId.slice(0, 8)}-ROW-${i + 1}`;
+    const sheetDnc =
+      dncIdx >= 0 && ['TRUE', 'YES', '1'].includes((cols[dncIdx] || '').trim().toUpperCase());
 
-    await supabase.from('leads').insert({
-      workspace_id: workspaceId,
-      external_lead_id: externalLeadId,
-      sheet_id: sheetId,
-      sheet_tab: sheetTab,
-      sheet_row_number: i + 1,
-      full_name: fullName,
-      raw_phone: rawPhone,
-      phone_e164: phoneE164,
-      service_interest: serviceInterest,
-      source,
-      calling_eligibility: callingEligibility,
-      eligibility_reference: eligibilityRef,
-      available_window: '10:00-19:00 IST',
-      do_not_call: false,
-      lead_temperature: 'UNQUALIFIED',
-      owner_user_id: ownerUserId,
-      sync_status: 'SYNCED',
-      last_synced_at: new Date().toISOString(),
-    });
-    existingPhones.add(phoneE164);
+    const existing = existingByLeadId.get(externalLeadId);
+    if (existing) {
+      // Preserve existing CRM ID, call history, outcomes, and follow-ups
+      await supabase
+        .from('leads')
+        .update({
+          full_name: fullName,
+          raw_phone: rawPhone,
+          phone_e164: phoneE164,
+          service_interest: serviceInterest,
+          source,
+          sheet_row_number: i + 1,
+          row_bound_key: `${externalLeadId}::${phoneE164}`,
+          calling_eligibility: callingEligibility,
+          eligibility_reference: eligibilityRef,
+          do_not_call: existing.do_not_call || sheetDnc,
+        })
+        .eq('workspace_id', workspaceId)
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('leads').insert({
+        workspace_id: workspaceId,
+        external_lead_id: externalLeadId,
+        sheet_id: sheetId,
+        sheet_tab: sheetTab,
+        sheet_row_number: i + 1,
+        row_bound_key: `${externalLeadId}::${phoneE164}`,
+        full_name: fullName,
+        raw_phone: rawPhone,
+        phone_e164: phoneE164,
+        service_interest: serviceInterest,
+        source,
+        calling_eligibility: callingEligibility,
+        eligibility_reference: eligibilityRef,
+        available_window: '09:00-20:00 IST',
+        do_not_call: sheetDnc,
+        lead_temperature: 'UNQUALIFIED',
+        attempts_count: 0,
+        owner_user_id: ownerUserId,
+        sync_status: 'PENDING',
+      });
+    }
     importedCount++;
   }
 
   return {
     importedCount,
     inspectedRows: lines.length - 1,
-    statusMessage: `Pulled ${importedCount} new lead(s) from Google Sheet ${sheetId} (${lines.length - 1} row(s) inspected).`,
+    statusMessage: `Synced ${importedCount} contact(s) from Google Sheet ${sheetId} (${lines.length - 1} row(s) inspected; auto-dial disabled).`,
   };
 }
 
@@ -234,66 +318,109 @@ export async function processPendingSheetSyncJobs(
       .maybeSingle();
     const lead = leadRes.data as Lead | null;
 
+    let writeSucceeded = true;
+    let writeError: string | null = null;
+
     if (accessToken && lead && job.sheet_row_number) {
       // Exact Columns J..T in Google Sheet 1X9sQhlRx_7jo1c6gZ8SBxNas5aqqRjgAY0-UzOUB97A:
       // J: CRM Lead ID, K: Call Outcome, L: Lead Temperature, M: Qualification Reason,
       // N: Call Summary, O: Last Call At, P: Callback At, Q: Attempts, R: Sync Status,
       // S: Last Synced At, T: Automation Do Not Call
+      // Uses valueInputOption=RAW so notes/summaries can never execute as spreadsheet formulas.
       const range = `${job.sheet_tab}!J${job.sheet_row_number}:T${job.sheet_row_number}`;
       const values = [
         [
-          lead.id,
-          lead.latest_call_outcome ?? '',
-          lead.lead_temperature,
-          lead.qualification_reason ?? '',
-          lead.call_summary ?? '',
-          lead.last_call_at ?? nowIso,
-          lead.callback_at ?? '',
+          String(lead.id),
+          String(lead.latest_call_outcome ?? ''),
+          String(lead.lead_temperature),
+          String(lead.qualification_reason ?? ''),
+          String(lead.call_summary ?? ''),
+          String(lead.last_call_at ?? nowIso),
+          String(lead.callback_at ?? ''),
           String(lead.attempts_count ?? 1),
           'SYNCED',
           nowIso,
           lead.do_not_call ? 'TRUE' : 'FALSE',
         ],
       ];
-      await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${job.sheet_id}/values/${encodeURIComponent(
-          range
-        )}?valueInputOption=USER_ENTERED`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ range, majorDimension: 'ROWS', values }),
+      try {
+        const sheetRes = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${job.sheet_id}/values/${encodeURIComponent(
+            range
+          )}?valueInputOption=RAW`,
+          {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ range, majorDimension: 'ROWS', values }),
+          }
+        );
+        if (!sheetRes.ok) {
+          writeSucceeded = false;
+          writeError = `Google Sheets API HTTP ${sheetRes.status}`;
         }
-      ).catch(() => undefined);
+      } catch (err) {
+        writeSucceeded = false;
+        writeError = err instanceof Error ? err.message : 'Google Sheets write failed';
+      }
     }
 
-    await supabase
-      .from('sheet_sync_jobs')
-      .update({
-        status: 'COMPLETED',
-        attempts: (job.attempts || 0) + 1,
-        completed_at: nowIso,
-        last_error: null,
-      })
-      .eq('workspace_id', workspaceId)
-      .eq('id', job.id);
-
-    if (lead) {
+    const nextAttempts = (job.attempts || 0) + 1;
+    if (writeSucceeded) {
       await supabase
-        .from('leads')
+        .from('sheet_sync_jobs')
         .update({
-          sync_status: 'SYNCED',
-          last_synced_at: nowIso,
-          sync_error: null,
+          status: 'SUCCEEDED',
+          attempts: nextAttempts,
+          completed_at: nowIso,
+          last_error: null,
+          locked_by: null,
+          lease_expires_at: null,
         })
         .eq('workspace_id', workspaceId)
-        .eq('id', lead.id);
-    }
+        .eq('id', job.id);
 
-    processedCount++;
+      if (lead) {
+        await supabase
+          .from('leads')
+          .update({
+            sync_status: 'SYNCED',
+            last_synced_at: nowIso,
+            sync_error: null,
+          })
+          .eq('workspace_id', workspaceId)
+          .eq('id', lead.id);
+      }
+
+      processedCount++;
+    } else {
+      const isDead = nextAttempts >= (job.max_attempts || 5);
+      await supabase
+        .from('sheet_sync_jobs')
+        .update({
+          status: isDead ? 'DEAD_LETTER' : 'FAILED',
+          attempts: nextAttempts,
+          last_error: writeError,
+          locked_by: null,
+          lease_expires_at: null,
+          next_attempt_at: new Date(Date.now() + 60_000).toISOString(),
+        })
+        .eq('workspace_id', workspaceId)
+        .eq('id', job.id);
+
+      if (lead) {
+        await supabase
+          .from('leads')
+          .update({
+            sync_status: 'FAILED',
+            sync_error: writeError,
+          })
+          .eq('workspace_id', workspaceId)
+          .eq('id', lead.id);
+      }
+    }
   }
 
   return {

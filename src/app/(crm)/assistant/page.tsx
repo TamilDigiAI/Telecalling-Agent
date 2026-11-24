@@ -1,14 +1,19 @@
 import { getProtectedPageContext } from '@/lib/auth/workspace-guard';
-import { getRuntimeEnv } from '@/lib/env';
 import { generateFounderTanglishBriefing, listWorkspaceLeads } from '@/lib/crm/service';
 import { createManualFollowUpTaskAction } from '@/app/actions/crm';
-import { NilaVoiceTestPanel } from '@/components/assistant/NilaVoiceTestPanel';
+import { FounderAssistantPanel } from '@/components/assistant/FounderAssistantPanel';
 
-export default async function FounderAssistantPage() {
+export default async function FounderAssistantPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const pageState = await getProtectedPageContext();
   if (pageState.status !== 'ready') return null;
 
-  const env = getRuntimeEnv();
+  const params = await searchParams;
+  const preselectedLeadId = typeof params.leadId === 'string' ? params.leadId : undefined;
+
   const { supabase, workspace } = pageState.context;
   const [briefing, leads] = await Promise.all([
     generateFounderTanglishBriefing(supabase, workspace.id, workspace.agent_name),
@@ -17,46 +22,17 @@ export default async function FounderAssistantPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[#0B1220]">
-          Founder Assistant · Voice Agent {workspace.agent_name}
-        </h1>
-        <p className="text-sm text-slate-600">
-          Private Nila Voice Test (Sarvam Saaras + Sarvam 105B + Bulbul v3) &amp; Workspace Briefing
-          for <strong>{workspace.name}</strong>.
-        </p>
-      </div>
+      <h1 className="text-2xl font-bold text-[#0B1220]">Nila Assistant</h1>
 
-      {/* Private Browser Nila Voice Test Screen (Does not create CRM tasks; Exotel & Sheets disabled) */}
-      <NilaVoiceTestPanel
-        sttModel={env.sarvamSttModel}
-        sttMode={env.sarvamSttMode}
-        ttsModel={env.sarvamTtsModel}
-        ttsSpeaker={env.sarvamTtsSpeaker}
-        ttsLanguage={env.sarvamTtsLanguage}
-        llmModel={env.llmModel}
-      />
-
-      <section className="bg-white border border-[#E2E8E2] rounded-xl p-5 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-[#0F7633]">
-            Live Tanglish CRM Briefing ({workspace.agent_name})
-          </span>
-          <span className="text-xs text-slate-500">Prompt: &ldquo;Innaiku hot leads yaaru?&rdquo;</span>
-        </div>
-        <blockquote className="p-4 rounded-xl bg-[#F7F9F6] border border-[#E2E8E2] text-sm font-medium text-[#0B1220]">
-          &ldquo;{briefing.tanglishText}&rdquo;
-        </blockquote>
+      <section className="bg-white border border-[#E2E8E2] rounded-xl p-5 space-y-2">
+        <h2 className="text-sm font-bold text-[#0F7633]">Daily Briefing</h2>
+        <p className="text-sm text-[#0B1220]">{briefing.tanglishText}</p>
       </section>
 
+      <FounderAssistantPanel />
+
       <section className="bg-white border border-[#E2E8E2] rounded-xl p-5 space-y-4">
-        <h2 className="text-base font-bold text-[#0B1220]">
-          Confirm &amp; Schedule Founder Callback Task
-        </h2>
-        <p className="text-xs text-slate-600">
-          Explicit confirmation in the current authenticated session creates or updates one idempotent
-          callback task.
-        </p>
+        <h2 className="text-base font-bold text-[#0B1220]">Schedule Follow-up Task</h2>
 
         <form action={createManualFollowUpTaskAction} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -70,11 +46,12 @@ export default async function FounderAssistantPage() {
               id="leadId"
               name="leadId"
               required
+              defaultValue={preselectedLeadId ?? leads[0]?.id ?? ''}
               className="w-full rounded-lg border border-[#E2E8E2] px-3 py-2 text-sm bg-white"
             >
               {leads.map((lead) => (
                 <option key={lead.id} value={lead.id}>
-                  {lead.full_name} ({lead.phone_e164}) — {lead.lead_temperature}
+                  {lead.full_name} ({lead.phone_e164})
                 </option>
               ))}
             </select>
@@ -85,14 +62,14 @@ export default async function FounderAssistantPage() {
               htmlFor="title"
               className="block text-xs font-semibold uppercase text-slate-700 mb-1"
             >
-              Callback Action Title
+              Title
             </label>
             <input
               id="title"
               name="title"
               type="text"
               required
-              defaultValue={`Founder callback confirmed via Assistant ${workspace.agent_name}`}
+              placeholder="e.g. Founder callback on Meta Ads quote"
               className="w-full rounded-lg border border-[#E2E8E2] px-3 py-2 text-sm"
             />
           </div>
@@ -102,23 +79,37 @@ export default async function FounderAssistantPage() {
               htmlFor="notes"
               className="block text-xs font-semibold uppercase text-slate-700 mb-1"
             >
-              Tanglish Read-Back / Notes
+              Notes
             </label>
             <input
               id="notes"
               name="notes"
               type="text"
-              defaultValue="Naalaikku kaalaila 11:00 AM IST founder callback confirm panniyachu."
+              placeholder="Optional callback notes or preferred IST slot"
               className="w-full rounded-lg border border-[#E2E8E2] px-3 py-2 text-sm"
             />
+          </div>
+
+          <div className="md:col-span-2 flex items-center gap-2">
+            <input
+              id="confirmed"
+              name="confirmed"
+              type="checkbox"
+              value="true"
+              required
+              className="h-4 w-4 rounded border-[#E2E8E2] text-[#149642]"
+            />
+            <label htmlFor="confirmed" className="text-xs font-medium text-[#0B1220]">
+              Confirm saving this follow-up task
+            </label>
           </div>
 
           <div className="md:col-span-2">
             <button
               type="submit"
-              className="px-4 py-2.5 rounded-lg bg-[#0F7633] hover:bg-[#149642] text-white text-sm font-semibold cursor-pointer"
+              className="px-4 py-2 rounded-lg bg-[#149642] hover:bg-[#0F7633] text-white text-sm font-semibold cursor-pointer"
             >
-              Confirm &amp; Create Follow-Up Task
+              Save Follow-up Task
             </button>
           </div>
         </form>

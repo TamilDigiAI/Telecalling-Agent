@@ -7,9 +7,12 @@ import {
   DEFAULT_WORKSPACE_SLUG,
 } from '@/lib/env';
 import { DEFAULT_DIGIANCHORZ_BUSINESS_SETTINGS } from '@/lib/knowledge/business-settings';
+import { PILOT_ALLOWLIST_PHONES, PILOT_TEST_CONTACTS } from '@/lib/pilot/test-contacts';
 import type {
   CallAttempt,
+  CallQueueJob,
   FollowUpTask,
+  IntegrationErrorRecord,
   Lead,
   LeadSuppression,
   SheetSyncJob,
@@ -30,6 +33,8 @@ interface LocalPilotStore {
   follow_up_tasks: FollowUpTask[];
   lead_suppressions: LeadSuppression[];
   sheet_sync_jobs: SheetSyncJob[];
+  call_queue_jobs: CallQueueJob[];
+  integration_errors: IntegrationErrorRecord[];
 }
 
 const globalForPilot = globalThis as unknown as {
@@ -137,7 +142,7 @@ function getOrInitPilotStore(): LocalPilotStore {
           google_sheet_id: DEFAULT_GOOGLE_SHEET_ID,
           google_sheet_url: DEFAULT_GOOGLE_SHEET_URL,
           google_sheet_tab: 'Leads',
-          allowlist_phones: ['+916383939949'],
+          allowlist_phones: [...PILOT_ALLOWLIST_PHONES],
           business_profile: buildInitialPilotBusinessProfile(),
           created_at: nowIso,
           updated_at: nowIso,
@@ -155,23 +160,24 @@ function getOrInitPilotStore(): LocalPilotStore {
         },
       ],
       leads: [
-        {
-          id: '20000000-0000-4000-8000-000000000002',
+        ...PILOT_TEST_CONTACTS.map((c, idx) => ({
+          id: `20000000-0000-4000-8000-00000000010${idx + 1}`,
           workspace_id: PILOT_WORKSPACE_ID,
-          external_lead_id: 'DAZ-PILOT-6383939949',
+          external_lead_id: c.externalLeadId,
           sheet_id: DEFAULT_GOOGLE_SHEET_ID,
           sheet_tab: 'Leads',
-          sheet_row_number: 1,
-          full_name: 'Tamilselvan Marimuthu (Pilot Test)',
-          raw_phone: '6383939949',
-          phone_e164: '+916383939949',
-          service_interest: 'Meta Ads for Facebook and Instagram lead generation',
-          source: 'Google Sheet',
-          calling_eligibility: 'ELIGIBLE',
-          eligibility_reference: 'GSHEET-1X9sQhlRx-PILOT-STAFF-CONSENT',
+          sheet_row_number: c.rowNumber,
+          row_bound_key: `${c.externalLeadId}::${c.phoneE164}`,
+          full_name: c.fullName,
+          raw_phone: c.rawPhone,
+          phone_e164: c.phoneE164,
+          service_interest: c.serviceInterest,
+          source: c.source,
+          calling_eligibility: c.callingEligibility,
+          eligibility_reference: c.eligibilityReference,
           available_window: '09:00-20:00 IST',
           do_not_call: false,
-          lead_temperature: 'UNQUALIFIED',
+          lead_temperature: 'UNQUALIFIED' as const,
           latest_call_outcome: null,
           qualification_reason: null,
           call_summary: null,
@@ -183,54 +189,26 @@ function getOrInitPilotStore(): LocalPilotStore {
           last_call_at: null,
           attempts_count: 0,
           owner_user_id: PILOT_FOUNDER_USER_ID,
-          sync_status: 'PENDING',
+          sync_status: 'PENDING' as const,
           last_synced_at: null,
           sync_error: null,
+          flagged_for_review: false,
+          review_reason: null,
           created_at: nowIso,
           updated_at: nowIso,
-        },
-        {
-          id: PILOT_SYNTHETIC_LEAD_ID,
-          workspace_id: PILOT_WORKSPACE_ID,
-          external_lead_id: 'DAZ-SYNTH-LEAD-001',
-          sheet_id: DEFAULT_GOOGLE_SHEET_ID,
-          sheet_tab: 'Leads',
-          sheet_row_number: 2,
-          full_name: 'Karthik Subramanian',
-          raw_phone: '98765 43210',
-          phone_e164: '+919876543210',
-          service_interest: 'Meta Ads for Facebook and Instagram lead generation',
-          source: 'Google Sheet',
-          calling_eligibility: 'ELIGIBLE',
-          eligibility_reference: 'GSHEET-1X9sQhlRx-ROW-2-ENQUIRY-CONSENT',
-          available_window: '10:00-19:00 IST',
-          do_not_call: false,
-          lead_temperature: 'UNQUALIFIED',
-          latest_call_outcome: null,
-          qualification_reason: null,
-          call_summary: null,
-          need_summary: null,
-          timeline: null,
-          budget_band: null,
-          next_action: null,
-          callback_at: null,
-          last_call_at: null,
-          attempts_count: 0,
-          owner_user_id: PILOT_FOUNDER_USER_ID,
-          sync_status: 'PENDING',
-          last_synced_at: null,
-          sync_error: null,
-          created_at: nowIso,
-          updated_at: nowIso,
-        },
+        })),
       ],
       call_attempts: [],
       follow_up_tasks: [],
       lead_suppressions: [],
       sheet_sync_jobs: [],
+      call_queue_jobs: [],
+      integration_errors: [],
     };
   }
   const store = globalForPilot.__dazLocalPilotStore!;
+  if (!store.call_queue_jobs) store.call_queue_jobs = [];
+  if (!store.integration_errors) store.integration_errors = [];
   const ws = store.workspaces[0];
   if (ws) {
     const bp = ws.business_profile as { founder_settings?: { callback_schedule?: string } } | undefined;
@@ -397,7 +375,9 @@ export function createLocalPilotSupabaseClient(user: User): SupabaseClient {
           ['NO_ANSWER', 'BUSY', 'FAILED', 'VOICEMAIL'].includes(callOutcome)
         ) {
           appliedTemp =
-            lead.lead_temperature === 'HOT' || lead.lead_temperature === 'WARM'
+            lead.lead_temperature === 'HOT' ||
+            lead.lead_temperature === 'WARM' ||
+            lead.lead_temperature === 'COLD'
               ? lead.lead_temperature
               : 'UNQUALIFIED';
         }
@@ -408,10 +388,13 @@ export function createLocalPilotSupabaseClient(user: User): SupabaseClient {
           lead_id: lead.id,
           attempt_number: lead.attempts_count + 1,
           agent_name: 'Nila',
-          provider: 'exotel_mock',
-          provider_call_sid: `mock-exo-${attemptId.slice(0, 8)}`,
+          provider: 'vobiz_mock',
+          provider_call_sid: `vobiz-mock-${attemptId.slice(0, 8)}`,
           direction: 'OUTBOUND',
-          status: 'COMPLETED',
+          status:
+            callOutcome && ['NO_ANSWER', 'BUSY', 'FAILED'].includes(callOutcome)
+              ? (callOutcome as CallAttempt['status'])
+              : 'COMPLETED',
           call_outcome: callOutcome,
           proposed_temperature: proposedTemp,
           applied_temperature: appliedTemp,
@@ -456,6 +439,24 @@ export function createLocalPilotSupabaseClient(user: User): SupabaseClient {
             created_at: nowIso,
             updated_at: nowIso,
           });
+          // Cancel open follow-up tasks and queued calls immediately on opt-out
+          for (const task of store.follow_up_tasks) {
+            if (task.workspace_id === lead.workspace_id && task.lead_id === lead.id && task.status === 'OPEN') {
+              task.status = 'CANCELLED';
+              task.updated_at = nowIso;
+            }
+          }
+          for (const qJob of store.call_queue_jobs) {
+            if (
+              qJob.workspace_id === lead.workspace_id &&
+              qJob.lead_id === lead.id &&
+              ['PENDING', 'CLAIMED', 'DIALING', 'RECONCILING'].includes(qJob.status)
+            ) {
+              qJob.status = 'CANCELLED';
+              qJob.last_error = 'Cancelled due to opt-out / DO_NOT_CALL';
+              qJob.updated_at = nowIso;
+            }
+          }
         } else if (args.p_callback_at) {
           const existingTask = store.follow_up_tasks.find(
             (t) =>

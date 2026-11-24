@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requireWorkspaceActionContext, WorkspaceAccessDeniedError } from '@/lib/auth/workspace-guard';
 import { resolveBusinessKnowledgeSettings } from '@/lib/knowledge/business-settings';
+import { loadBusinessYamlConfig, SILENCE_10S_MARKER } from '@/lib/knowledge/business-yaml';
 import {
   createDiagnosticWavBuffer,
   generateNilaReplyWithSarvamLlm,
   runFullNilaVoicePipeline,
   synthesizeNilaAudioWithBulbul,
   transcribeWithSarvamSaaras,
+  type ConversationMessage,
 } from '@/lib/voice/sarvam-nila';
 
 export const runtime = 'nodejs';
@@ -24,6 +26,7 @@ export async function POST(request: NextRequest) {
   try {
     const { workspace } = await requireWorkspaceActionContext();
     const businessSettings = resolveBusinessKnowledgeSettings(workspace.business_profile);
+    const businessYamlConfig = loadBusinessYamlConfig();
 
     const contentType = request.headers.get('content-type') || '';
 
@@ -31,6 +34,16 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData();
       const testStage = String(formData.get('stage') ?? 'full');
       const uploaded = formData.get('audio');
+      const rawHistory = formData.get('history');
+      let history: ConversationMessage[] = [];
+      if (typeof rawHistory === 'string' && rawHistory.trim()) {
+        try {
+          const parsed = JSON.parse(rawHistory);
+          if (Array.isArray(parsed)) history = parsed;
+        } catch {
+          history = [];
+        }
+      }
 
       let audioBuffer: Buffer;
       let fileName = 'utterance.wav';
@@ -63,18 +76,40 @@ export async function POST(request: NextRequest) {
         audioBuffer,
         fileName,
         mimeType,
-        businessSettings
+        businessSettings,
+        { businessYamlConfig, history }
       );
       return NextResponse.json(fullResult);
     }
 
     const body = (await request.json()) as {
-      stage?: 'stt' | 'dialogue' | 'tts' | 'full';
+      stage?: 'stt' | 'dialogue' | 'tts' | 'full' | 'silence';
       transcript?: string;
       replyText?: string;
+      history?: ConversationMessage[];
     };
 
     const stage = body.stage ?? 'full';
+    const history = Array.isArray(body.history) ? body.history : [];
+
+    if (stage === 'silence') {
+      const dialogue = await generateNilaReplyWithSarvamLlm(
+        SILENCE_10S_MARKER,
+        businessSettings,
+        'outbound_sales',
+        { businessYamlConfig, history }
+      );
+      const tts = dialogue.succeeded
+        ? await synthesizeNilaAudioWithBulbul(dialogue.replyText)
+        : undefined;
+      return NextResponse.json({
+        exotelDialingDisabled: true,
+        googleSheetsWriteBackDisabled: true,
+        crmTasksCreated: 0,
+        dialogue,
+        tts,
+      });
+    }
 
     if (stage === 'stt') {
       const sampleTts = await synthesizeNilaAudioWithBulbul(
@@ -96,7 +131,8 @@ export async function POST(request: NextRequest) {
       const dialogue = await generateNilaReplyWithSarvamLlm(
         body.transcript || SAMPLE_KONGU_UTTERANCE,
         businessSettings,
-        'outbound_sales'
+        'outbound_sales',
+        { businessYamlConfig, history }
       );
       return NextResponse.json({
         exotelDialingDisabled: true,
@@ -119,7 +155,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // stage === 'full' via JSON (generates spoken utterance WAV, transcribes via Saaras, replies via sarvam-105b-conversations, synthesizes via Bulbul v3 ishita)
+    // stage === 'full' via JSON
     const sampleTts = await synthesizeNilaAudioWithBulbul(
       body.transcript || SAMPLE_KONGU_UTTERANCE
     );
@@ -130,7 +166,8 @@ export async function POST(request: NextRequest) {
       wavBuf,
       'sample.wav',
       'audio/wav',
-      businessSettings
+      businessSettings,
+      { businessYamlConfig, history }
     );
     return NextResponse.json(fullResult);
   } catch (err) {

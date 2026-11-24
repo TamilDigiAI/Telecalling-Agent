@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   CallAttempt,
+  CallQueueJob,
   FollowUpTask,
   FollowUpTaskStatus,
   FollowUpTaskType,
+  IntegrationErrorRecord,
   Lead,
   LeadSuppression,
   LeadTemperature,
@@ -182,6 +184,34 @@ export async function listWorkspaceSheetSyncJobs(
 
   if (error) throw error;
   return (data ?? []) as SheetSyncJob[];
+}
+
+export async function listWorkspaceCallQueueJobs(
+  supabase: SupabaseClient,
+  workspaceId: string
+): Promise<CallQueueJob[]> {
+  const { data, error } = await supabase
+    .from('call_queue_jobs')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: false });
+
+  if (error) return [];
+  return (data ?? []) as CallQueueJob[];
+}
+
+export async function listWorkspaceIntegrationErrors(
+  supabase: SupabaseClient,
+  workspaceId: string
+): Promise<IntegrationErrorRecord[]> {
+  const { data, error } = await supabase
+    .from('integration_errors')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: false });
+
+  if (error) return [];
+  return (data ?? []) as IntegrationErrorRecord[];
 }
 
 /**
